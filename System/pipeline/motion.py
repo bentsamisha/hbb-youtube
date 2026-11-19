@@ -756,15 +756,15 @@ def camera_plan(clips, edit, cfg):
     punch = look.get("zoom_punch", 1.2)
     level, prev = 1.0, None
     for i, c in enumerate(clips):
-        kind = None
+        kind, hold = None, None
         for zc in edit.get("zoom", []):
             if zc["t0"] - 0.3 <= c["src_in"] <= zc["t1"]:
                 kind = zc["kind"]
+                if kind == "in":
+                    hold = float(zc.get("z", punch))  # held only inside the cue, e.g. to crop something out
         if prev is not None and c["src_in"] - prev > look.get("punch_after_gap", 2.0):
             level = punch if level == 1.0 else 1.0
-        if kind == "in":
-            level = punch
-        c["level"], c["kind"] = level, kind
+        c["level"], c["kind"] = (hold if hold else level), (None if kind == "in" else kind)
         prev = c["src_out"]
     if clips:
         clips[0]["kind"] = clips[0]["kind"] or "slow_in"

@@ -83,7 +83,8 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
   Only when the notes say he will film or generate a real clip, put `t` on the sentence it illustrates; a dropped-in
   file `broll_NN.mp4` then plays full frame over the picture.
 - `cards`: `{"t", "what"}` YouTube card moments (he adds cards in Studio; the pipeline lists the times for him).
-- `zoom`: `{"t0", "t1", "kind": "slow_in"|"slow_out"|"in"}` from the camera notes.
+- `zoom`: `{"t0", "t1", "kind": "slow_in"|"slow_out"|"in", "z"?}` from the camera notes. `in` holds a punch-in for the
+  kept clips inside t0-t1 (`z`, default 1.2; 1.35 crops the bottom fifth, e.g. to hide something in the frame).
 - `fixes`: `[["heard", "correct"], ...]` for misheard words in the captions (ISO numbers, names: "Mykhailo Bentsa",
   "HoneyBadger and Bees", "ISO/IEC 22989", "SaaS"). The captions use the transcript words, so this matters.
 
