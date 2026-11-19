@@ -152,5 +152,11 @@
   "rise_volume": 0.25,
   "duck_threshold": 0.03,
   "duck_ratio": 6
+ },
+ "thumbnail": {
+  "on": true,
+  "chat_url": "https://chatgpt.com/c/6a4143e0-0d14-83eb-95f0-57b11430646f",
+  "ask": "Make a thumbnail for this video description",
+  "add_brief": false
  }
 }
