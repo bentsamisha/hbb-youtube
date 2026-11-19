@@ -23,8 +23,10 @@
    - **Happy?** Drag the whole folder into **`3 Approved`**.
 5. Approved: uploaded right away as private with a publish time (next free Monday 09:00 Lisbon), with the thumbnail,
    subtitles, description and tags. YouTube publishes it itself.
-6. After it's live: pin the comment from `YOUTUBE.txt`, add the cards and end screen in YouTube Studio
-   (the API can't set those), and use the LinkedIn hook for that day's post.
+6. Cards and end screen: Claude adds them in YouTube Studio through Claude in Chrome (the API can't set those),
+   from the to-do list in `System/studio_queue.json`; see `Studio Links.md`. When the next episode goes live, the
+   previous one's "next video" card and end screen are pointed at it.
+7. After it's live: pin the comment from `YOUTUBE.txt` and use the LinkedIn hook for that day's post.
 
 ## What the edit does
 - **Retakes and pauses**: every paragraph of the production table is matched to the transcript; the last complete

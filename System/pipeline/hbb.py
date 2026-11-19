@@ -517,6 +517,10 @@ def process_approved():
             job.update(youtube=res, stage="scheduled", uploaded=time.time(), error=None)
             write_json(info(folder, "job.json"), job)
             write_upload_kit(folder)
+            try:
+                studio_after_upload(folder, job)
+            except Exception as e:
+                log("studio queue:", e)
             dest = os.path.join(DIRS["scheduled"], os.path.basename(folder))
             shutil.move(folder, dest)
             log("uploaded", job["episode"], res)
@@ -537,6 +541,68 @@ def process_approved():
                 notify("YouTube daily limit", "%s uploads automatically later" % job["episode"])
             elif job["attempts"] in (1, 5):
                 notify("Upload failed", "%s: %s" % (job["episode"], str(e)[:120]))
+
+
+# ---------------------------------------------------------------- YouTube Studio links (done in the browser)
+# The YouTube API can't add cards or end-screen elements, so every upload queues them in System/studio_queue.json.
+# A Claude session with Claude in Chrome works through that queue in YouTube Studio (see Guides/Studio Links.md)
+# and marks each item done. Nothing here touches the browser.
+
+def studio_queue_path():
+    return os.path.join(ROOT, "System", "studio_queue.json")
+
+
+def studio_queue():
+    return read_json(studio_queue_path(), []) or []
+
+
+def studio_add(item):
+    q = studio_queue()
+    if any(x.get("key") == item["key"] for x in q):
+        return
+    item.update(status="todo", added=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    q.append(item)
+    write_json(studio_queue_path(), q)
+
+
+def studio_after_upload(folder, job):
+    """Cards at the script's link moments + the end screen, for the video just uploaded."""
+    edit = read_json(info(folder, "edit.json")) or {}
+    post = read_json(info(folder, "post.json")) or {}
+    tl = editor.Timeline(edit["keep"])
+    rend = read_json(info(folder, "render.json"), {}) or {}
+    yt = job.get("youtube") or {}
+    cards, later = [], []
+    for x in edit.get("cards", []):
+        c = {"at": editor.mmss(tl.out(x["t"])), "target": x["what"]}
+        (later if re.search(r"next video|once it is published|coming soon", x["what"], re.I) else cards).append(c)
+    end_at = editor.mmss(rend.get("body", tl.duration))
+    studio_add({"key": "%s/links" % yt.get("id", job["name"]), "episode": job["episode"], "video_id": yt.get("id"),
+                "studio_url": "https://studio.youtube.com/video/%s/edit" % yt.get("id", ""),
+                "title": (job.get("youtube") or {}).get("title") or job.get("label", ""),
+                "cards": cards if any(re.search(r"estimate|honeybadgerandbees", c["target"], re.I) for c in cards) else
+                cards + [{"at": "highest-intent moment (the LinkedIn DM line)", "target": "Free Estimate (honeybadgerandbees.com)"}],
+                "end_screen": {"from": end_at, "elements": post.get("end_screen", []) + ["Subscribe"]},
+                "waiting_for_next_video": later})
+
+
+def studio_after_live(folder, job):
+    """This video is now public: the previous episode's 'next video' card and end screen can point to it."""
+    yt = job.get("youtube") or {}
+    q = studio_queue()
+    prev = [x for x in q if x.get("waiting_for_next_video") and x.get("video_id") != yt.get("id")]
+    for p in prev[-1:]:
+        studio_add({"key": "%s/next/%s" % (p["video_id"], yt.get("id")), "episode": p["episode"], "video_id": p["video_id"],
+                    "studio_url": p["studio_url"], "title": p.get("title", ""),
+                    "cards": [{"at": c["at"], "target": "%s (%s)" % (job["episode"], yt.get("url", ""))}
+                              for c in p["waiting_for_next_video"]],
+                    "end_screen": {"from": p["end_screen"]["from"],
+                                   "elements": ["%s (%s), replace the oldest video element" % (job["episode"], yt.get("url", ""))]}})
+        q = studio_queue()
+        for x in q:
+            if x["key"] == p["key"]:
+                x["waiting_for_next_video"] = []
+        write_json(studio_queue_path(), q)
 
 
 def process_scheduled():
@@ -562,6 +628,10 @@ def process_scheduled():
                 continue
         job.update(stage="posted", posted_at=time.time())
         write_json(info(folder, "job.json"), job)
+        try:
+            studio_after_live(folder, job)
+        except Exception as e:
+            log("studio queue:", e)
         shutil.move(folder, os.path.join(DIRS["posted"], os.path.basename(folder)))
         notify("Live", "%s is live: %s" % (job["episode"], yt.get("url", "")))
 
