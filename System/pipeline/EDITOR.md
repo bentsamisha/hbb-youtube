@@ -116,12 +116,18 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
 - Standard hyphens only, never em dashes, in every field. No "revolutionary", "game-changing", "cutting-edge",
   "world-class", "robust", "leverage", "synergy". No hard sell. Practitioner voice, anti-checkbox.
 - `linkedin_posts`: three LAUNCH posts for publish day, ranked, best first (Strategy/HoneyBadger_Master_Content_System.md
-  Part 6). Each 150-200 words, prose not bullets, short paragraphs with blank lines: HOOK (1-2 lines in the audience's
-  words: quoted objection, recurring question, "a pattern from 50+ audits", or a direct answer; never "I just
-  launched" or "New video alert") / CONTEXT (2-3 short paragraphs on the viewer's real situation) / DIFFERENTIATION
-  (one line: 50+ audits, no vendor bias, no sales pitch) / optional one-line tease from the video / a passion-project
-  line such as "🦡 6 minutes. No upselling. Just real talk from 50+ audits." / "Link in the comments 👇" / 3-5 hashtags,
-  primary standard first. No link in the post itself. Knowledge-sharing, never selling.
+  Part 6), in Mykhailo's own format (his ISO 42001 roles post is the model). 120-200 words, plain prose, very short
+  paragraphs (1-3 lines) with a blank line between each:
+  HOOK: one line in the audience's words that names a common belief ("Most SaaS companies tell me they're pure AI
+  customers."), then a one-line twist ("Almost none of them are 🙂"). Never "I just launched" or "New video alert".
+  CONTEXT: 2-3 short paragraphs explaining why, concretely, with what the standard actually says (clause numbers,
+  related standards). DIFFERENTIATION in passing (50+ audits, no vendor bias) only if it fits.
+  TEASE: one line "New video goes through ..." listing what the video covers.
+  CLOSE, exactly two lines: "🦡 N minutes. No upselling. Just what the standards say." (N = the video's rounded
+  length in minutes) and "Link in the comments 👇".
+  HASHTAGS: one line of 3-5, primary standard first (#ISO42001 #AIGovernance #ISO22989).
+  No link in the post. No bullets. Knowledge-sharing, never selling. The thumbnail is attached as the image and the
+  first comment (YouTube link + website) is added by the pipeline.
 - Title patterns: "[Standard] vs [Standard] - [question]", "How to [action] - [consequence]",
   "[Topic]: [question]? An Auditor's Honest Take" (signature). Rank three, recommend one.
 - Thumbnail: the frame `t` should show his face looking into the lens with an expression that fits; look at it.

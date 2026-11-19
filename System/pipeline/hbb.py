@@ -308,7 +308,7 @@ END SCREEN (Studio > Editor > End screen: the last {end_s} s are made for it, fr
 {line}
 SETTINGS (set automatically on upload)
 - File: {video} ({size}, {dur})
-- Thumbnail: cover.jpg
+- Thumbnail: {thumb}
 - Subtitles: Additional info/subtitles.srt (English)
 - Audience: No, it's not made for kids
 - Altered or synthetic content: {synthetic}
@@ -321,11 +321,12 @@ LinkedIn hook idea for publish day: {li}
            end_s=c["end_screen_seconds"], end_at=editor.mmss(tl.duration), video=os.path.basename(main_video(folder) or "video.mp4"),
            size="x".join(str(x) for x in rend.get("size", [])) or "4K", dur=editor.mmss(rend.get("duration", tl.duration)),
            synthetic="Yes (AI B-roll is used)" if rend.get("broll_used") else "No",
-           li=editor.no_em_dash(post.get("linkedin_hook", "")) or "-",
+           li=editor.no_em_dash(post.get("linkedin_hook", "")) or "-", thumb=os.path.basename(thumb_file(folder)),
            status=("Uploaded: %s (publishes %s)\n" % (yt_status.get("url"), when)) if yt_status.get("id") else "")
     with open(os.path.join(folder, "YOUTUBE.txt"), "w") as f:
         f.write(text)
     write_linkedin(folder, post, job)
+    write_thumbnail_prompt(folder, post, job)
     # B-roll shot list
     brolls = edit.get("broll", [])
     used = set(rend.get("broll_used", []))
@@ -377,6 +378,10 @@ def to_review(job, episode, summary=""):
         with open(info(folder, "Claude notes.txt"), "w") as f:
             f.write(summary + "\n")
     write_upload_kit(folder)
+    try:
+        thumb_queue_add(folder, job_rec)
+    except Exception as e:
+        log("thumbnail queue:", e)
     return folder
 
 
@@ -512,7 +517,7 @@ def process_approved():
             yt = youtube_text(post, edit, cfg())
             yt["synthetic"] = bool((read_json(info(folder, "render.json"), {}) or {}).get("broll_used"))
             res = pub.youtube_upload(main_video(folder), yt, slot.astimezone(timezone.utc),
-                                     thumbnail=os.path.join(folder, "cover.jpg"),
+                                     thumbnail=thumb_file(folder),
                                      captions=info(folder, "subtitles.srt") if acfg().get("upload_captions", True) else None,
                                      category=acfg().get("category_id", "27"), playlist_id=acfg().get("playlist_id", ""))
             job.update(youtube=res, stage="scheduled", uploaded=time.time(), error=None)
@@ -555,7 +560,7 @@ def process_approved():
 
 def first_comment(url):
     b = cfg()["brand"]
-    return "\U0001f3ac Watch the full breakdown here:\n\n%s\n\n\U0001f41d More about HoneyBadger & Bees:\n\n%s" % (
+    return "\U0001f3ac Watch the full breakdown here:\n%s\n\U0001f41d More about HoneyBadger & Bees:\n%s" % (
         url or "[YouTube link]", b.get("website", "https://www.honeybadgerandbees.com/"))
 
 
@@ -570,7 +575,8 @@ def write_linkedin(folder, post, job):
            "Goes out from your profile about 10 minutes after the video is live, once you've said yes in the chat.",
            "The post under POST is what gets published: edit it here if you want different wording.", line, "POST:", "",
            posts[0] if posts else "(no post yet: Claude writes one before publish day)", "", line,
-           "FIRST COMMENT (added right after posting):", "", first_comment(url)]
+           "IMAGE: the episode thumbnail (%s) is attached to the post." % os.path.basename(thumb_file(folder)), line,
+           "FIRST COMMENT (added right after posting, then pinned):", "", first_comment(url)]
     for i, p in enumerate(posts[1:], 2):
         out += ["", line, "ALTERNATIVE %d (copy it over the POST above to use it):" % i, "", p]
     with open(os.path.join(folder, "LINKEDIN.txt"), "w") as f:
@@ -598,9 +604,76 @@ def linkedin_after_upload(folder, job, slot):
         return
     q.append({"episode": job["episode"], "video_id": yt.get("id"), "video_url": yt.get("url"),
               "post_at": (slot + timedelta(minutes=acfg().get("linkedin_delay_minutes", 10))).isoformat(),
-              "text": linkedin_text(folder), "first_comment": first_comment(yt.get("url")),
+              "text": linkedin_text(folder), "first_comment": first_comment(yt.get("url")), "pin_comment": True,
+              "image": linkedin_image(folder, job),
+              "image_url": "https://i.ytimg.com/vi/%s/maxresdefault.jpg" % yt.get("id") if yt.get("id") else "",
               "status": "needs_ok", "added": datetime.now(timezone.utc).isoformat(timespec="seconds")})
     write_json(linkedin_queue_path(), q)
+
+
+def linkedin_image(folder, job):
+    """Copy the thumbnail to System/linkedin/ so it outlives the episode folder moving between stages."""
+    src = thumb_file(folder)
+    if not os.path.exists(src):
+        return ""
+    d = os.path.join(ROOT, "System", "linkedin")
+    os.makedirs(d, exist_ok=True)
+    dst = os.path.join(d, re.sub(r"[^A-Za-z0-9._-]+", "_", job.get("episode", "episode")) + os.path.splitext(src)[1].lower())
+    shutil.copy(src, dst)
+    return os.path.relpath(dst, ROOT)
+
+
+# ---------------------------------------------------------------- Thumbnail (made in his ChatGPT image chat)
+# The pipeline writes THUMBNAIL_PROMPT.txt and queues the episode in System/thumbnail_queue.json. A Claude session with
+# Claude in Chrome sends the prompt in his thumbnail chat (it already has his photo), downloads the image and saves it
+# as THUMBNAIL.jpg in the Review folder (see Guides/Thumbnails.md). THUMBNAIL.jpg/.png, when present, is the YouTube
+# thumbnail and the LinkedIn image; cover.jpg (a frame with text) is only the fallback.
+
+def thumb_file(folder):
+    for fn in ("THUMBNAIL.jpg", "THUMBNAIL.jpeg", "THUMBNAIL.png"):
+        if os.path.exists(os.path.join(folder, fn)):
+            return os.path.join(folder, fn)
+    return os.path.join(folder, "cover.jpg")
+
+
+def thumbnail_prompt(post, job, edit=None):
+    """His own way of asking for a thumbnail in that chat: the request line, then the title and the YouTube description.
+    The chat already holds his photos and earlier thumbnails, so it keeps the face and the style."""
+    t = cfg().get("thumbnail", {})
+    yt = youtube_text(post, edit, cfg()) if edit else {"title": post.get("title", ""), "description": ""}
+    title = re.sub(r"^[^\w\[(]+", "", yt["title"]).strip()
+    out = [t.get("ask", "Make a thumbnail for this video description"), title, "", yt["description"].strip()]
+    b = post.get("thumbnail_brief") or {}
+    if b and t.get("add_brief", True):
+        bits = [b.get(k) for k in ("headline", "big", "sub") if b.get(k)]
+        out += ["", "Thumbnail text idea (optional): " + " / ".join(bits)
+                + ("; checklist: " + "; ".join(b["checklist"]) if b.get("checklist") else "")
+                + ("; badge: " + b["badge"] if b.get("badge") else "")]
+    return editor.no_em_dash("\n".join(out)).strip()
+
+
+def write_thumbnail_prompt(folder, post, job):
+    with open(os.path.join(folder, "THUMBNAIL_PROMPT.txt"), "w") as f:
+        f.write("THUMBNAIL PROMPT  (%s)\n" % job.get("episode", "")
+                + "Claude sends this in your ChatGPT thumbnail chat and saves the result here as THUMBNAIL.jpg.\n"
+                + "Want a different one? Edit the prompt below, delete THUMBNAIL.jpg, or write it in CHANGES.txt.\n"
+                + "-" * 64 + "\n" + thumbnail_prompt(post, job, read_json(info(folder, "edit.json"))) + "\n")
+
+
+def thumb_queue_path():
+    return os.path.join(ROOT, "System", "thumbnail_queue.json")
+
+
+def thumb_queue_add(folder, job):
+    if not cfg().get("thumbnail", {}).get("on", True) or os.path.basename(thumb_file(folder)) != "cover.jpg":
+        return
+    q = read_json(thumb_queue_path(), []) or []
+    ep = job.get("episode", "")
+    if any(x.get("episode") == ep and x.get("status") == "todo" for x in q):
+        return
+    q.append({"episode": ep, "folder": os.path.relpath(folder, ROOT), "status": "todo",
+              "added": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    write_json(thumb_queue_path(), q)
 
 
 # ---------------------------------------------------------------- YouTube Studio links (done in the browser)
