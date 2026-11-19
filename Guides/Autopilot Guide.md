@@ -21,7 +21,7 @@
      ("use the first take of the intro", "the on-screen text at 02:10 should say ...", "title option 2").
      Claude redoes it. If it's a lasting rule, say so; it goes into `System/pipeline/EDITOR_NOTES.md` for every future video.
    - **Happy?** Drag the whole folder into **`3 Approved`**.
-5. Approved: uploaded right away as private with a publish time (next free Thursday 09:00 Lisbon), with the thumbnail,
+5. Approved: uploaded right away as private with a publish time (next free Monday 09:00 Lisbon), with the thumbnail,
    subtitles, description and tags. YouTube publishes it itself.
 6. After it's live: pin the comment from `YOUTUBE.txt`, add the cards and end screen in YouTube Studio
    (the API can't set those), and use the LinkedIn hook for that day's post.
