@@ -43,6 +43,7 @@
 - **Sound**: rumble filter, light denoise (the LG air conditioner), gentle compression, loudness -14 LUFS for YouTube.
 
 ## Settings (`System/pipeline/config.json`)
+- `autopilot.first_slot_date`: no video goes live before this day (set to 2026-11-30 so Ep 12 is the first). Clear it once it has passed.
 - `autopilot.post_times`: e.g. `{"mon": ["09:00"], "thu": ["17:00"]}` for two slots a week.
 - `look.face_x` / `face_y`: where your face sits in the frame (0..1), used for punch-ins and the thumbnail.
 - `brand`: name, role line, tagline and colours used on the cards.
