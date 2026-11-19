@@ -103,7 +103,8 @@ def stable(path, age=60):
     paths = [path] if os.path.isfile(path) else [p for p in glob.glob(os.path.join(path, "**", "*"), recursive=True)] + [path]
     newest = max(os.stat(p).st_mtime for p in paths)
     size = sum(os.path.getsize(p) for p in paths if os.path.isfile(p))
-    if time.time() - newest < age:
+    # a camera clock set ahead stamps files in the future: those count as old, the size check below still catches a copy in progress
+    if 0 <= time.time() - newest < age:
         return False
     time.sleep(3)
     return size == sum(os.path.getsize(p) for p in paths if os.path.isfile(p))
