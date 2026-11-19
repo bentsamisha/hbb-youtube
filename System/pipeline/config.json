@@ -132,6 +132,7 @@
    ]
   },
   "min_lead_minutes": 90,
+  "first_slot_date": "2026-11-30",
   "youtube": true,
   "category_id": "27",
   "playlist_id": "",

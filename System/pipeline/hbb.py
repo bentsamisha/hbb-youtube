@@ -466,6 +466,8 @@ def next_slot(now=None, exclude=None):
     tz = ZoneInfo(acfg().get("timezone", "Europe/Lisbon"))
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     earliest = now + timedelta(minutes=acfg().get("min_lead_minutes", 90))
+    if acfg().get("first_slot_date"):  # e.g. "2026-11-30": keep a buffer, nothing goes live before this day
+        earliest = max(earliest, datetime.fromisoformat(acfg()["first_slot_date"]).replace(tzinfo=tz))
     taken = taken_slots(exclude)
     times = acfg().get("post_times") or {"mon": ["09:00"]}
     for day in range(0, 120):
