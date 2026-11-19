@@ -104,7 +104,7 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
  "pinned_comment": "topic-specific engagement question for the pinned comment",
  "thumbnail": {"t": src_sec, "text": ["2-4 WORDS", "MAX"], "accent": "the one word in honey gold"},
  "end_screen": ["episode to suggest next", "older episode to suggest"],
- "linkedin_hook": "one scroll-stopping first line for his Monday LinkedIn post, in the audience's words",
+ "linkedin_hook": "one scroll-stopping first line for his LinkedIn post on publish day, in the audience's words",
  "notes": "one or two lines for Mykhailo: what you cut, anything unsure"}
 ```
 - `chapters`: SOURCE seconds at the start of each section (the pipeline converts them to exact video times; never

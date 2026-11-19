@@ -4,7 +4,7 @@
 |---|---|
 | **1 Inbox** | Drop the camera files here. One video, or a folder with all clips of one episode (`C0001.MP4`, `C0002.MP4` ...). Put the episode number in the name (`12`, `EP12`, `Video 12`), or the pipeline finds the script by itself. |
 | **2 Review** | Finished episodes waiting for you, one folder each (e.g. `EP.12 The Fine-Tuning Trap`). Watch it, then drag the folder to **3 Approved**, or write `CHANGES.txt` inside it. |
-| **3 Approved** | Uploaded to YouTube within minutes and scheduled for the next free slot (Mondays 09:00 Lisbon by default). |
+| **3 Approved** | Uploaded to YouTube within minutes and scheduled for the next free slot (Thursdays 09:00 Lisbon by default). |
 | **4 Scheduled** | Uploaded, waiting for its publish time. YouTube publishes it itself, the Mac can be off. |
 | **5 Posted** | Live. `Additional info/job.json` has the link. |
 | **Raw Footage** | Your original camera files, untouched. |
