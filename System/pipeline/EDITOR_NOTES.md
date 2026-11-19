@@ -13,3 +13,11 @@ The Claude editor reads this before every edit and appends a dated line when a c
 - 2026-11-19 (Ep 12 review): **No jumpy joins.** Never join two pieces of one sentence across a long pause or a
   head/position change ("Add one question to your change | or release process" jumped in sound and picture). Use one
   continuous take of the whole sentence; if none exists, cut at a sentence boundary in the silence, not mid-sentence.
+- 2026-11-19 (Ep 12 review): **Don't rush the ending.** In the sign-off and the next-video tease keep natural pauses
+  (0.5-0.8 s) between sentences, and a full beat before "link below" / the last line. Fast-cut endings feel like
+  he's being chopped off. Elsewhere the normal tight pauses are fine.
+- 2026-11-19 (Ep 12 review): the company card (`brand`) is small and sits low in the bottom-left; the `subscribe`
+  graphic is only the button, bottom-right, no extra line of text. Both are built that way in motion.py.
+- 2026-11-19 (Ep 12 review): every video gets the channel's own generated music (assets/music, mixed automatically):
+  a calm bed under the talk and a track that builds during the next-video tease and lands on the end card. Nothing to
+  do in edit.json; just keep the tease as the last spoken part before the end card.
