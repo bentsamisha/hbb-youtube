@@ -107,6 +107,7 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
  "thumbnail": {"t": src_sec, "text": ["2-4 WORDS", "MAX"], "accent": "the one word in honey gold"},
  "end_screen": ["episode to suggest next", "older episode to suggest"],
  "linkedin_hook": "one scroll-stopping first line for his LinkedIn post on publish day, in the audience's words",
+ "linkedin_posts": ["3 launch posts, best first (see LinkedIn below)"],
  "notes": "one or two lines for Mykhailo: what you cut, anything unsure"}
 ```
 - `chapters`: SOURCE seconds at the start of each section (the pipeline converts them to exact video times; never
@@ -114,6 +115,13 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
   three groups, the decision/CTA. 5-9 chapters, each at least 10 s.
 - Standard hyphens only, never em dashes, in every field. No "revolutionary", "game-changing", "cutting-edge",
   "world-class", "robust", "leverage", "synergy". No hard sell. Practitioner voice, anti-checkbox.
+- `linkedin_posts`: three LAUNCH posts for publish day, ranked, best first (Strategy/HoneyBadger_Master_Content_System.md
+  Part 6). Each 150-200 words, prose not bullets, short paragraphs with blank lines: HOOK (1-2 lines in the audience's
+  words: quoted objection, recurring question, "a pattern from 50+ audits", or a direct answer; never "I just
+  launched" or "New video alert") / CONTEXT (2-3 short paragraphs on the viewer's real situation) / DIFFERENTIATION
+  (one line: 50+ audits, no vendor bias, no sales pitch) / optional one-line tease from the video / a passion-project
+  line such as "🦡 6 minutes. No upselling. Just real talk from 50+ audits." / "Link in the comments 👇" / 3-5 hashtags,
+  primary standard first. No link in the post itself. Knowledge-sharing, never selling.
 - Title patterns: "[Standard] vs [Standard] - [question]", "How to [action] - [consequence]",
   "[Topic]: [question]? An Auditor's Honest Take" (signature). Rank three, recommend one.
 - Thumbnail: the frame `t` should show his face looking into the lens with an expression that fits; look at it.

@@ -325,6 +325,7 @@ LinkedIn hook idea for publish day: {li}
            status=("Uploaded: %s (publishes %s)\n" % (yt_status.get("url"), when)) if yt_status.get("id") else "")
     with open(os.path.join(folder, "YOUTUBE.txt"), "w") as f:
         f.write(text)
+    write_linkedin(folder, post, job)
     # B-roll shot list
     brolls = edit.get("broll", [])
     used = set(rend.get("broll_used", []))
@@ -521,6 +522,10 @@ def process_approved():
                 studio_after_upload(folder, job)
             except Exception as e:
                 log("studio queue:", e)
+            try:
+                linkedin_after_upload(folder, job, slot)
+            except Exception as e:
+                log("linkedin queue:", e)
             dest = os.path.join(DIRS["scheduled"], os.path.basename(folder))
             shutil.move(folder, dest)
             log("uploaded", job["episode"], res)
@@ -541,6 +546,61 @@ def process_approved():
                 notify("YouTube daily limit", "%s uploads automatically later" % job["episode"])
             elif job["attempts"] in (1, 5):
                 notify("Upload failed", "%s: %s" % (job["episode"], str(e)[:120]))
+
+
+# ---------------------------------------------------------------- LinkedIn launch post
+# Posted from his own LinkedIn about 10 minutes after the video goes live, YouTube link in the first comment.
+# Claude posts it through Claude in Chrome only after Mykhailo says yes to that week's post in the chat
+# (see Guides/LinkedIn Posting.md); the queue is System/linkedin_queue.json.
+
+def first_comment(url):
+    b = cfg()["brand"]
+    return "\U0001f3ac Watch the full breakdown here:\n\n%s\n\n\U0001f41d More about HoneyBadger & Bees:\n\n%s" % (
+        url or "[YouTube link]", b.get("website", "https://www.honeybadgerandbees.com/"))
+
+
+def write_linkedin(folder, post, job):
+    posts = [editor.no_em_dash(p) for p in post.get("linkedin_posts", []) if p]
+    kept = linkedin_text(folder)  # his own edit of the POST section survives re-renders and the upload
+    if kept and not kept.startswith("(no post yet"):
+        posts = [kept] + [p for p in posts if p.strip() != kept]
+    url = (job.get("youtube") or {}).get("url")
+    line = "-" * 64
+    out = ["LINKEDIN LAUNCH POST  (%s)" % job.get("episode", ""),
+           "Goes out from your profile about 10 minutes after the video is live, once you've said yes in the chat.",
+           "The post under POST is what gets published: edit it here if you want different wording.", line, "POST:", "",
+           posts[0] if posts else "(no post yet: Claude writes one before publish day)", "", line,
+           "FIRST COMMENT (added right after posting):", "", first_comment(url)]
+    for i, p in enumerate(posts[1:], 2):
+        out += ["", line, "ALTERNATIVE %d (copy it over the POST above to use it):" % i, "", p]
+    with open(os.path.join(folder, "LINKEDIN.txt"), "w") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def linkedin_text(folder):
+    """The POST section of LINKEDIN.txt, as he may have edited it."""
+    try:
+        s = open(os.path.join(folder, "LINKEDIN.txt")).read()
+    except OSError:
+        return ""
+    m = re.search(r"\nPOST:\n(.*?)\n-{20,}", s, re.S)
+    return m.group(1).strip() if m else ""
+
+
+def linkedin_queue_path():
+    return os.path.join(ROOT, "System", "linkedin_queue.json")
+
+
+def linkedin_after_upload(folder, job, slot):
+    q = read_json(linkedin_queue_path(), []) or []
+    yt = job.get("youtube") or {}
+    if any(x.get("video_id") == yt.get("id") for x in q):
+        return
+    q.append({"episode": job["episode"], "video_id": yt.get("id"), "video_url": yt.get("url"),
+              "post_at": (slot + timedelta(minutes=acfg().get("linkedin_delay_minutes", 10))).isoformat(),
+              "text": linkedin_text(folder), "first_comment": first_comment(yt.get("url")),
+              "status": "needs_ok", "added": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    write_json(linkedin_queue_path(), q)
 
 
 # ---------------------------------------------------------------- YouTube Studio links (done in the browser)
