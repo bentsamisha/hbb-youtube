@@ -1,0 +1,143 @@
+{
+ "whisper_model": "small",
+ "whisper_model_path": "",
+ "language": "en",
+ "whisper_prompt": "Mykhailo Bentsa, HoneyBadger and Bees Technologies. ISO 27001, ISO 42001, ISO/IEC 22989, ISO/IEC 42006, SOC 2, ISMS, AIMS, Annex A, EU AI Act, SaaS founders, Lead Auditor.",
+ "fixes": [
+  [
+   "I am Mihaila Benz",
+   "I'm Mykhailo Bentsa"
+  ],
+  [
+   "Mihaila Benz",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "Mikhailo Bentsa",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "Mihailo Bentsa",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "Mykhailo Benz",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "Michael Benz",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "Mykhailo Benza",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "Michael Bentsa",
+   "Mykhailo Bentsa"
+  ],
+  [
+   "honey badger and bees",
+   "HoneyBadger and Bees"
+  ],
+  [
+   "honeybadger and bees",
+   "HoneyBadger and Bees"
+  ],
+  [
+   "SAS",
+   "SaaS"
+  ],
+  [
+   "22, 989",
+   "22989"
+  ],
+  [
+   "22 989",
+   "22989"
+  ],
+  [
+   "tax enemy",
+   "taxonomy"
+  ],
+  [
+   "ISO 42,001",
+   "ISO 42001"
+  ],
+  [
+   "ISO 27,001",
+   "ISO 27001"
+  ],
+  [
+   "lead auditor",
+   "Lead Auditor"
+  ]
+ ],
+ "cut": {
+  "noise_db": -38,
+  "min_silence": 0.4,
+  "pad_before": 0.1,
+  "pad_after": 0.2,
+  "max_pause": 0.55,
+  "keep_pause": 0.25,
+  "min_take_score": 0.6
+ },
+ "look": {
+  "face_x": 0.6,
+  "face_y": 0.38,
+  "zoom_punch": 1.12,
+  "slow_zoom": 0.06,
+  "punch_after_gap": 2.0
+ },
+ "output": {
+  "height": 2160,
+  "fps": 0,
+  "encoder": "auto",
+  "bitrate": "45M",
+  "crf": 18,
+  "preset": "medium"
+ },
+ "audio": {
+  "lufs": -14,
+  "highpass": 80,
+  "denoise": true,
+  "denoise_db": 10
+ },
+ "captions": {
+  "burn": true,
+  "max_words": 7,
+  "max_chars": 42
+ },
+ "end_screen_seconds": 20,
+ "brand": {
+  "name": "Mykhailo Bentsa",
+  "credentials": "Lead Auditor - ISO 27001 & ISO 42001",
+  "company": "HoneyBadger and Bees Technologies",
+  "tagline": "Enterprise compliance, without the enterprise headache",
+  "signoff": "Done with warmth - done properly",
+  "charcoal": "1A1815",
+  "cream": "F5EFE0",
+  "gold": "E5A019",
+  "grey": "6B6357",
+  "website": "https://www.honeybadgerandbees.com/",
+  "linkedin": "https://www.linkedin.com/in/michael-bentsa/"
+ },
+ "autopilot": {
+  "timezone": "Europe/Lisbon",
+  "post_times": {
+   "mon": [
+    "09:00"
+   ]
+  },
+  "min_lead_minutes": 90,
+  "youtube": true,
+  "category_id": "27",
+  "playlist_id": "",
+  "upload_captions": true,
+  "claude_bin": "",
+  "claude_model": "",
+  "drive_scripts_folder": "1_hjuLz5ZJZ_HKQNC2s3MZZgnqQHGevTx",
+  "warn_when_queue_below": 1,
+  "keep_raw_days_after_post": 14
+ }
+}

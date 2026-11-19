@@ -1,0 +1,12 @@
+# Code + docs only. Videos, scripts, strategy, logins and work files stay on the Mac / in Drive.
+/*
+!/.gitignore
+!/Read Me First.md
+!/Guides/
+!/System/
+/System/*
+!/System/pipeline/
+/System/pipeline/.venv/
+__pycache__/
+*.pyc
+.DS_Store

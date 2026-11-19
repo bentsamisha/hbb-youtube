@@ -1,0 +1,727 @@
+"""HoneyBadger and Bees autopilot: raw footage -> Claude edit -> render -> your review -> scheduled YouTube upload.
+
+  hbb.py tick               one pass over every folder (launchd runs this every 5 min and when a folder changes)
+  hbb.py status             what's where, and the next free posting slot
+  hbb.py auth youtube|drive connect the HoneyBadger and Bees channel / read-only Drive access for the scripts
+  hbb.py scripts            export the Video_N_Script docs from Google Drive into HBB/Scripts
+  hbb.py run <video|folder> [--episode N]   process one recording now, in the foreground
+  hbb.py rerender <folder>  render an episode in "2 Review" again (same edit, e.g. after adding B-roll)
+  hbb.py retry <folder>     clear an upload error so the next tick tries again
+  hbb.py install|uninstall  start/stop the background agent
+
+Folders (in HBB/):
+  1 Inbox       drop the camera files here: one video, or a folder with all clips of one episode (C0001.MP4, C0002.MP4...).
+                Put the episode number in the name ("12", "EP12", "Video 12") or let the pipeline find the script itself.
+  2 Review      one folder per episode, e.g. "EP.12 The Fine-Tuning Trap": watch it, then
+                - move the folder into "3 Approved" to schedule it, or
+                - write what to change into CHANGES.txt inside the folder (Claude re-edits it), or
+                - drop B-roll clips into its "B-roll" folder as broll_01.mp4, broll_02.mp4 ... (re-rendered automatically)
+  3 Approved    uploaded to YouTube on the next tick, scheduled for the next free slot (Mondays 09:00 Lisbon by default)
+  4 Scheduled   uploaded and waiting for its publish time (YouTube publishes it itself, the Mac can be off)
+  5 Posted      live; "Additional info/job.json" has the link
+"""
+import fcntl
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import traceback
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+PIPE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, PIPE)
+import editor  # noqa: E402
+import publish as pub  # noqa: E402
+import scripts  # noqa: E402
+
+ROOT = editor.ROOT
+SYSTEM = editor.SYSTEM
+DIRS = {"inbox": os.path.join(ROOT, "1 Inbox"), "review": os.path.join(ROOT, "2 Review"),
+        "approved": os.path.join(ROOT, "3 Approved"), "scheduled": os.path.join(ROOT, "4 Scheduled"),
+        "posted": os.path.join(ROOT, "5 Posted"), "raw": os.path.join(ROOT, "Raw Footage"),
+        "scripts": scripts.SCRIPTS_DIR, "logs": os.path.join(SYSTEM, "logs"), "work": editor.WORK}
+INFO = "Additional info"
+AGENT = "com.honeybadgerandbees.autopilot"
+PLIST = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % AGENT)
+read_json, write_json = editor.read_json, editor.write_json
+
+
+def log(*a):
+    line = "%s  %s" % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), " ".join(str(x) for x in a))
+    print(line, flush=True)
+    os.makedirs(DIRS["logs"], exist_ok=True)
+    with open(os.path.join(DIRS["logs"], "hbb.log"), "a") as f:
+        f.write(line + "\n")
+
+
+def notify(title, msg):
+    log("NOTIFY", title, "-", msg)
+    if sys.platform == "darwin":
+        script = 'display notification %s with title %s sound name "Glass"' % (json.dumps(msg), json.dumps("HBB: " + title))
+        subprocess.run(["osascript", "-e", script], capture_output=True)
+
+
+def cfg():
+    return editor.load_config()
+
+
+def acfg():
+    return cfg().get("autopilot", {})
+
+
+def info(folder, fn=""):
+    return os.path.join(folder, INFO, fn)
+
+
+def jobs_in(stage):
+    out = []
+    for d in sorted(glob.glob(os.path.join(DIRS[stage], "*", INFO, "job.json"))):
+        out.append((os.path.dirname(os.path.dirname(d)), read_json(d, {})))
+    return out
+
+
+def main_video(folder):
+    vids = sorted(glob.glob(os.path.join(folder, "*.mp4")))
+    return vids[0] if vids else None
+
+
+def find_folder(job_name):
+    for stage in ("review", "approved", "scheduled", "posted"):
+        for folder, job in jobs_in(stage):
+            if job.get("name") == job_name:
+                return folder
+    return None
+
+
+def stable(path, age=60):
+    """Camera files copy slowly from the SD card: wait until nothing in it changed for a minute."""
+    paths = [path] if os.path.isfile(path) else [p for p in glob.glob(os.path.join(path, "**", "*"), recursive=True)] + [path]
+    newest = max(os.stat(p).st_mtime for p in paths)
+    size = sum(os.path.getsize(p) for p in paths if os.path.isfile(p))
+    if time.time() - newest < age:
+        return False
+    time.sleep(3)
+    return size == sum(os.path.getsize(p) for p in paths if os.path.isfile(p))
+
+
+# ---------------------------------------------------------------- Claude editor
+
+def claude_bin():
+    c = acfg().get("claude_bin")
+    for p in [c, shutil.which("claude"), os.path.expanduser("~/.local/bin/claude"), os.path.expanduser("~/.claude/local/claude")]:
+        if p and os.path.exists(p):
+            return p
+    bundled = sorted(glob.glob(os.path.expanduser(
+        "~/Library/Application Support/Claude/claude-code/*/*/claude.app/Contents/MacOS/claude")))
+    if bundled:
+        return bundled[-1]
+    return None
+
+
+def run_editor(job, notes=None, error=None, timeout=60 * 60, turns=150):
+    jd = os.path.join(DIRS["work"], job)
+    msg = ["Read System/pipeline/EDITOR.md and System/pipeline/EDITOR_NOTES.md and follow them.",
+           "Job folder: System/work/%s/" % job]
+    msg.append("This is a CHANGE REQUEST. Mykhailo's change notes:\n" + notes if notes else "This is a first edit of a new recording.")
+    if error:
+        msg.append("Your previous edit failed validation, fix it: " + error)
+    binary = claude_bin()
+    if not binary:
+        raise RuntimeError("Claude Code CLI not found (Guides/Setup Steps.md, step 2)")
+    env = dict(os.environ)
+    token = os.path.join(pub.SECRETS, "claude_token.txt")
+    if os.path.exists(token):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = open(token).read().strip()
+    env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + env.get("PATH", "/usr/bin:/bin")
+    cmd = [binary, "-p", "\n".join(msg), "--permission-mode", "acceptEdits", "--max-turns", str(turns),
+           "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(mkdir:*)",
+           "Bash(cp:*)"]
+    if acfg().get("claude_model"):
+        cmd += ["--model", acfg()["claude_model"]]
+    log("editor:", job, "(change request)" if notes else "")
+    r = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
+    with open(os.path.join(jd, "editor_log.txt"), "a") as f:
+        f.write("\n==== %s\n%s\n%s\n" % (datetime.now(), r.stdout, r.stderr))
+    if r.returncode != 0 or "Not logged in" in r.stdout:
+        raise RuntimeError("Claude editor failed: %s" % (r.stdout + r.stderr).strip()[-400:])
+    return r.stdout.strip()
+
+
+def validate(job):
+    jd = os.path.join(DIRS["work"], job)
+    edit = read_json(os.path.join(jd, "edit.json"))
+    post = read_json(os.path.join(jd, "post.json"))
+    if not edit or not edit.get("keep"):
+        return "edit.json missing, not valid JSON, or without keep ranges"
+    if not post or not post.get("title"):
+        return "post.json missing or has no title"
+    last = -1.0
+    for r in edit["keep"]:
+        if len(r) < 2 or r[1] <= r[0] or r[0] < last - 0.01:
+            return "keep ranges must be [start, end] in time order without overlaps (problem at %s)" % r
+        last = r[1]
+    dur = editor.Timeline(edit["keep"]).duration
+    if not 30 <= dur <= 30 * 60:
+        return "talk length %.0f s looks wrong" % dur
+    text = json.dumps(post, ensure_ascii=False)
+    if "—" in text:
+        return "post.json contains an em dash; use standard hyphens"
+    for o in edit.get("overlays", []):
+        if not o.get("lines"):
+            return "an overlay has no lines"
+    return None
+
+
+def fallback_post(job):
+    """No Claude available: a plain post.json from the script so the video still reaches Review."""
+    jd = os.path.join(DIRS["work"], job)
+    sc = read_json(os.path.join(jd, "script.json"), {}) or {}
+    draft = read_json(os.path.join(jd, "draft.json"))
+    title = re.sub(r"^Video\s*\d+\s*-\s*", "", sc.get("title", job)).strip()
+    chapters = [{"t": draft["keep"][0][0], "title": "Intro"}]
+    for r in draft["rows"]:
+        m = re.match(r"(Group (?:one|two|three|number one|\d))[.,]?\s*(.*?)[.]", r["text"], re.I)
+        if m and r.get("start") is not None:
+            chapters.append({"t": r["start"], "title": m.group(2)[:50].strip().capitalize() or m.group(1).title()})
+    write_json(os.path.join(jd, "post.json"), {
+        "episode_name": title[:40], "title": title, "titles": [title], "hook": "", "context": "", "credibility": "",
+        "chapters": chapters, "audience": [], "question": "", "hashtags": ["#ISO27001"], "tags": [],
+        "thumbnail": {"t": draft["keep"][0][0] + 3, "text": title.split()[:3]},
+        "notes": "Written without the Claude editor (not available): please write the description yourself."})
+    shutil.copy(os.path.join(jd, "draft.json"), os.path.join(jd, "edit.json"))
+
+
+def edit_and_render(job, notes=None):
+    jd = os.path.join(DIRS["work"], job)
+    summary, err = "", None
+    if claude_bin():
+        for attempt in range(2):
+            summary = run_editor(job, notes, err)
+            err = validate(job)
+            if not err:
+                break
+            log("validation:", err)
+        if err:
+            raise RuntimeError(err)
+    else:
+        if not os.path.exists(os.path.join(jd, "post.json")):
+            fallback_post(job)
+        summary = "Automatic edit only (Claude editor not set up): check the cuts and write the description."
+    editor.render(job, log=log)
+    return summary
+
+
+# ---------------------------------------------------------------- the episode folder
+
+def youtube_text(post, edit, cfg_):
+    """YouTube title/description/tags from post.json, in the house style; timestamps are exact (from the edit)."""
+    b = cfg_["brand"]
+    tl = editor.Timeline(edit["keep"])
+    fix = editor.no_em_dash
+    parts = [fix(post.get(k, "")).strip() for k in ("hook", "context", "credibility")]
+    desc = [p for p in parts if p]
+    chap = editor.chapters_text(post, tl)
+    if chap:
+        desc.append("⏱️ TIMESTAMPS\n" + "\n".join(chap))
+    if post.get("audience"):
+        desc.append("\U0001f3af WHO THIS VIDEO IS FOR\n" + "\n".join("✅ " + fix(a) for a in post["audience"]))
+    desc.append("\U0001f517 GET IN TOUCH\n\U0001f310 Free Estimate: %s\n\U0001f4bc LinkedIn DM: %s" % (b["website"], b["linkedin"]))
+    if post.get("question"):
+        desc.append("\U0001f4e9 " + fix(post["question"]))
+    desc.append("\U0001f41d HoneyBadger & Bees Technologies\n%s." % fix(b["signoff"]).rstrip("."))
+    tags = post.get("hashtags", [])[:5]
+    if tags:
+        desc.append(" ".join(tags))
+    yt_tags = list(post.get("tags", []))
+    while len(",".join(yt_tags)) > 480:
+        yt_tags.pop()
+    return {"title": fix(post["title"])[:100], "description": "\n\n".join(desc), "tags": yt_tags, "chapters": chap}
+
+
+def write_upload_kit(folder):
+    post = read_json(info(folder, "post.json"))
+    job = read_json(info(folder, "job.json"), {})
+    edit = read_json(info(folder, "edit.json"))
+    if not post or not edit:
+        return
+    c = cfg()
+    yt = youtube_text(post, edit, c)
+    tl = editor.Timeline(edit["keep"])
+    rend = read_json(info(folder, "render.json"), {}) or {}
+    if job.get("slot"):
+        when = datetime.fromisoformat(job["slot"]).strftime("%A %d %B %Y, %H:%M") + " (Lisbon)"
+    else:
+        when = 'set automatically when you move this folder to "3 Approved" (next free %s)' % ", ".join(
+            "%s %s" % (d.capitalize(), " / ".join(t)) for d, t in acfg().get("post_times", {}).items())
+    line = "-" * 64
+    alts = "\n".join(post.get("titles", [])) or yt["title"]
+    cards = "\n".join("- %s  %s" % (editor.mmss(tl.out(x["t"])), x["what"]) for x in edit.get("cards", [])) or "- none in the script"
+    ends = "\n".join("- " + x for x in post.get("end_screen", [])) or "- your latest episode + the one this video builds on"
+    yt_status = (job.get("youtube") or {})
+    text = """YOUTUBE VIDEO  ({ep})
+Posting time: {when}
+The autopilot uploads this for you when you approve it. Use this file only to check the text, or to upload by hand.
+To change the text: edit "Additional info/post.json" (this file is rebuilt from it), or write it in CHANGES.txt.
+{status}
+{line}
+TITLE (recommended, then the alternatives):
+{title}
+
+{alts}
+
+{line}
+DESCRIPTION (copy):
+{desc}
+
+{line}
+TAGS (Show more > Tags, copy):
+{tags}
+
+{line}
+PINNED COMMENT (post it after the video is live, then pin it):
+{pinned}
+
+{line}
+CARDS (YouTube Studio > Editor > Cards, add at these times):
+{cards}
+- Add a card to the Free Estimate page at the highest-intent moment (usually the LinkedIn DM line).
+
+{line}
+END SCREEN (Studio > Editor > End screen: the last {end_s} s are made for it, from {end_at}):
+{ends}
+- Subscribe button
+
+{line}
+SETTINGS (set automatically on upload)
+- File: {video} ({size}, {dur})
+- Thumbnail: cover.jpg
+- Subtitles: Additional info/subtitles.srt (English)
+- Audience: No, it's not made for kids
+- Altered or synthetic content: {synthetic}
+- Category: Education
+- Visibility: Schedule > {when}
+
+LinkedIn hook idea for Monday: {li}
+""".format(ep=job.get("episode", ""), when=when, line=line, title=yt["title"], alts=alts, desc=yt["description"],
+           tags=", ".join(yt["tags"]), pinned=editor.no_em_dash(post.get("pinned_comment", "")), cards=cards, ends=ends,
+           end_s=c["end_screen_seconds"], end_at=editor.mmss(tl.duration), video=os.path.basename(main_video(folder) or "video.mp4"),
+           size="x".join(str(x) for x in rend.get("size", [])) or "4K", dur=editor.mmss(rend.get("duration", tl.duration)),
+           synthetic="Yes (AI B-roll is used)" if rend.get("broll_used") else "No",
+           li=editor.no_em_dash(post.get("linkedin_hook", "")) or "-",
+           status=("Uploaded: %s (publishes %s)\n" % (yt_status.get("url"), when)) if yt_status.get("id") else "")
+    with open(os.path.join(folder, "YOUTUBE.txt"), "w") as f:
+        f.write(text)
+    # B-roll shot list
+    brolls = edit.get("broll", [])
+    used = set(rend.get("broll_used", []))
+    lines = ["B-ROLL SHOTS  (%s)" % job.get("episode", ""), "",
+             "Generate each clip (Veo / Gemini, or any stock clip), save it into the \"B-roll\" folder next to this file",
+             "as broll_01.mp4, broll_02.mp4 ... (a .jpg/.png works too). The video is rendered again by itself within",
+             "a few minutes and you get a notification. Clips are trimmed to the length below; 16:9, 1080p or 4K.", ""]
+    for b_ in brolls:
+        at = editor.mmss(tl.out(b_["t"])) if b_.get("t") is not None else "(row not in the footage)"
+        lines += ["%s  broll_%02d   at %s for %d s" % ("DONE" if b_["n"] in used else "TODO", b_["n"], at, b_["dur"]),
+                  "   prompt: " + b_.get("prompt", ""), ""]
+    if not brolls:
+        lines.append("No B-roll in this script.")
+    with open(os.path.join(folder, "B-ROLL.txt"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def episode_label(job, episode):
+    post = read_json(os.path.join(DIRS["work"], job, "post.json"), {}) or {}
+    title = post.get("episode_name") or job
+    title = re.sub(r"[^\w\s'&+-]", "", editor.no_em_dash(title)).strip()
+    return ("%s %s" % (episode, title)).strip()
+
+
+def to_review(job, episode, summary=""):
+    """Build (or refresh) the episode folder in "2 Review" from the work folder."""
+    jd = os.path.join(DIRS["work"], job)
+    label = episode_label(job, episode)
+    folder = os.path.join(DIRS["review"], label)
+    old = find_folder(job)
+    if old and old != folder:
+        shutil.move(old, folder)
+    os.makedirs(info(folder), exist_ok=True)
+    os.makedirs(os.path.join(folder, "B-roll"), exist_ok=True)
+    for f in glob.glob(os.path.join(folder, "*.mp4")):
+        os.remove(f)
+    shutil.move(os.path.join(jd, "final.mp4"), os.path.join(folder, label + ".mp4"))
+    shutil.copy(os.path.join(jd, "thumbnail.jpg"), os.path.join(folder, "cover.jpg"))
+    shutil.copy(os.path.join(jd, "captions.srt"), info(folder, "subtitles.srt"))
+    for fn in ("post.json", "render.json"):
+        shutil.copy(os.path.join(jd, fn), info(folder, fn))
+    edit = read_json(os.path.join(jd, "edit.json")) or read_json(os.path.join(jd, "draft.json"))
+    write_json(info(folder, "edit.json"), {k: v for k, v in edit.items() if k not in ("rows",)})
+    job_rec = read_json(info(folder, "job.json"), {}) or {"name": job, "episode": episode, "created": time.time()}
+    job_rec.update(stage="review", label=label, summary=summary, rendered=time.time(),
+                   broll_seen=sorted(os.path.basename(p) for p in glob.glob(os.path.join(folder, "B-roll", "*"))))
+    write_json(info(folder, "job.json"), job_rec)
+    if summary:
+        with open(info(folder, "Claude notes.txt"), "w") as f:
+            f.write(summary + "\n")
+    write_upload_kit(folder)
+    return folder
+
+
+# ---------------------------------------------------------------- stages
+
+def process_inbox():
+    for path in sorted(glob.glob(os.path.join(DIRS["inbox"], "*"))):
+        base = os.path.basename(path)
+        if base.startswith(".") or (os.path.isfile(path) and not path.lower().endswith(editor.VIDEO_EXT)):
+            continue
+        if not stable(path):
+            continue
+        if os.path.isdir(path) and not editor.gather(path):
+            continue
+        raw = os.path.join(DIRS["raw"], base)
+        if os.path.exists(raw):
+            raw = os.path.join(DIRS["raw"], "%s %s" % (time.strftime("%Y%m%d-%H%M"), base))
+        shutil.move(path, raw)
+        job = os.path.splitext(os.path.basename(raw))[0] if os.path.isfile(raw) else os.path.basename(raw)
+        notify("New recording", "%s: transcribing and editing (about 20-40 minutes)" % base)
+        try:
+            jd = editor.analyze(raw, job=job, log=log)
+            draft = read_json(os.path.join(jd, "draft.json"))
+            episode = "EP.%02d" % draft["episode"] if draft.get("episode") else "EP.xx"
+            if not draft.get("episode"):
+                notify("No script found", "%s: editing without a script. Put the episode number in the name next time." % base)
+            summary = edit_and_render(job)
+            folder = to_review(job, episode, summary)
+            notify("Ready for review", "%s is in \"2 Review\". Approve it or write CHANGES.txt" % os.path.basename(folder))
+        except Exception as e:
+            log(traceback.format_exc())
+            notify("Edit failed", "%s: %s" % (base, str(e)[:150]))
+            fail = os.path.join(DIRS["review"], "%s (FAILED)" % job)
+            os.makedirs(info(fail), exist_ok=True)
+            write_json(info(fail, "job.json"), {"name": job, "stage": "failed", "error": str(e)[:1500],
+                                                "raw": raw, "created": time.time()})
+
+
+def process_changes():
+    for folder, job in jobs_in("review"):
+        if job.get("stage") == "failed" or job.get("sample"):
+            continue
+        name = job["name"]
+        jd = os.path.join(DIRS["work"], name)
+        changes = os.path.join(folder, "CHANGES.txt")
+        broll_now = sorted(os.path.basename(p) for p in glob.glob(os.path.join(folder, "B-roll", "*")) if not os.path.basename(p).startswith("."))
+        # post.json edited by hand in the folder: take it over
+        fp, wp = info(folder, "post.json"), os.path.join(jd, "post.json")
+        if os.path.exists(fp) and os.path.exists(wp) and os.path.getmtime(fp) > os.path.getmtime(wp) + 2:
+            shutil.copy(fp, wp)
+            write_upload_kit(folder)
+        try:
+            if os.path.exists(changes) and stable(changes, age=20):
+                notes = open(changes).read().strip()
+                os.rename(changes, os.path.join(folder, "CHANGES done %s.txt" % time.strftime("%Y-%m-%d %H%M")))
+                if not notes:
+                    continue
+                notify("Changes", "%s: re-editing" % job["episode"])
+                shutil.copy(info(folder, "post.json"), wp)
+                summary = edit_and_render(name, notes=notes)
+                to_review(name, job["episode"], summary)
+                notify("Updated", "%s is ready again in \"2 Review\"" % job["episode"])
+            elif broll_now != job.get("broll_seen", []) and broll_now and all(stable(os.path.join(folder, "B-roll", b), age=20) for b in broll_now):
+                edit = read_json(os.path.join(jd, "edit.json"))
+                edit["broll_dirs"] = [os.path.join(folder, "B-roll")]
+                write_json(os.path.join(jd, "edit.json"), edit)
+                notify("B-roll", "%s: adding %d clip(s), rendering again" % (job["episode"], len(broll_now)))
+                editor.render(name, log=log)
+                to_review(name, job["episode"], job.get("summary", ""))
+                notify("Updated", "%s now has its B-roll" % job["episode"])
+        except Exception as e:
+            log(traceback.format_exc())
+            notify("Update failed", "%s: %s" % (job.get("episode"), str(e)[:150]))
+
+
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def taken_slots(exclude=None):
+    out = set()
+    for stage in ("approved", "scheduled", "posted"):
+        for _, j in jobs_in(stage):
+            if j.get("slot") and j.get("name") != exclude:
+                out.add(datetime.fromisoformat(j["slot"]))
+    return out
+
+
+def next_slot(now=None, exclude=None):
+    tz = ZoneInfo(acfg().get("timezone", "Europe/Lisbon"))
+    now = (now or datetime.now(timezone.utc)).astimezone(tz)
+    earliest = now + timedelta(minutes=acfg().get("min_lead_minutes", 90))
+    taken = taken_slots(exclude)
+    times = acfg().get("post_times") or {"mon": ["09:00"]}
+    for day in range(0, 120):
+        d = (now + timedelta(days=day)).date()
+        for hm in sorted(times.get(DAYS[d.weekday()], [])):
+            h, m = map(int, hm.split(":"))
+            slot = datetime(d.year, d.month, d.day, h, m, tzinfo=tz)
+            if slot >= earliest and slot not in taken:
+                return slot
+    raise RuntimeError("no free posting slot: check autopilot.post_times in config.json")
+
+
+def process_approved():
+    for folder, job in jobs_in("approved"):
+        if (job.get("youtube") or {}).get("id"):
+            shutil.move(folder, os.path.join(DIRS["scheduled"], os.path.basename(folder)))
+            notify("Already uploaded", "%s was uploaded before: moved back to 4 Scheduled" % job.get("episode"))
+            continue
+        if job.get("stage") == "failed":
+            continue
+        if job.get("sample"):
+            if not job.get("sample_note"):
+                notify("Sample only", "%s is a test package and is never uploaded" % os.path.basename(folder))
+                job["sample_note"] = time.time()
+                write_json(info(folder, "job.json"), job)
+            continue
+        slot = datetime.fromisoformat(job["slot"]) if job.get("slot") else next_slot(exclude=job.get("name"))
+        job.update(slot=slot.isoformat(), approved=job.get("approved") or time.time(), stage="approved")
+        write_json(info(folder, "job.json"), job)
+        if not acfg().get("youtube", True):
+            job["stage"] = "scheduled"
+            write_json(info(folder, "job.json"), job)
+            write_upload_kit(folder)
+            shutil.move(folder, os.path.join(DIRS["scheduled"], os.path.basename(folder)))
+            notify("Scheduled", "%s: upload it by hand for %s (YOUTUBE.txt)" % (job["episode"], slot.strftime("%a %d %b %H:%M")))
+            continue
+        try:
+            post = read_json(info(folder, "post.json"))
+            edit = read_json(info(folder, "edit.json"))
+            yt = youtube_text(post, edit, cfg())
+            yt["synthetic"] = bool((read_json(info(folder, "render.json"), {}) or {}).get("broll_used"))
+            res = pub.youtube_upload(main_video(folder), yt, slot.astimezone(timezone.utc),
+                                     thumbnail=os.path.join(folder, "cover.jpg"),
+                                     captions=info(folder, "subtitles.srt") if acfg().get("upload_captions", True) else None,
+                                     category=acfg().get("category_id", "27"), playlist_id=acfg().get("playlist_id", ""))
+            job.update(youtube=res, stage="scheduled", uploaded=time.time(), error=None)
+            write_json(info(folder, "job.json"), job)
+            write_upload_kit(folder)
+            dest = os.path.join(DIRS["scheduled"], os.path.basename(folder))
+            shutil.move(folder, dest)
+            log("uploaded", job["episode"], res)
+            notify("Scheduled", "%s uploaded, goes live %s" % (job["episode"], slot.strftime("%a %d %b %H:%M")))
+            if res.get("warning"):
+                notify("Check YouTube Studio", res["warning"])
+        except pub.NeedsAuth as e:
+            if job.get("error") != str(e):
+                notify("Login needed", str(e))
+            job["error"] = str(e)
+            write_json(info(folder, "job.json"), job)
+        except Exception as e:
+            log(traceback.format_exc())
+            job["attempts"] = job.get("attempts", 0) + 1
+            job["error"] = str(e)[:500]
+            write_json(info(folder, "job.json"), job)
+            if any(r in str(e) for r in ("uploadLimitExceeded", "quotaExceeded")):
+                notify("YouTube daily limit", "%s uploads automatically later" % job["episode"])
+            elif job["attempts"] in (1, 5):
+                notify("Upload failed", "%s: %s" % (job["episode"], str(e)[:120]))
+
+
+def process_scheduled():
+    now = datetime.now(timezone.utc)
+    for folder, job in jobs_in("scheduled"):
+        if not job.get("slot"):
+            shutil.move(folder, os.path.join(DIRS["approved"], os.path.basename(folder)))
+            continue
+        if now < datetime.fromisoformat(job["slot"]) + timedelta(minutes=10):
+            continue
+        yt = job.get("youtube") or {}
+        if yt.get("id"):
+            try:
+                st = pub.youtube_status(yt["id"])
+                if st.get("privacyStatus") != "public":
+                    if not job.get("not_public_note"):
+                        notify("Not public yet", "%s is still %s on YouTube: check Studio" % (job["episode"], st.get("privacyStatus")))
+                        job["not_public_note"] = time.time()
+                        write_json(info(folder, "job.json"), job)
+                    continue
+            except Exception as e:
+                log("status check failed:", e)
+                continue
+        job.update(stage="posted", posted_at=time.time())
+        write_json(info(folder, "job.json"), job)
+        shutil.move(folder, os.path.join(DIRS["posted"], os.path.basename(folder)))
+        notify("Live", "%s is live: %s" % (job["episode"], yt.get("url", "")))
+
+
+def cleanup_posted():
+    """Some days after going live, delete the work caches (the raw footage stays in "Raw Footage")."""
+    days = acfg().get("keep_raw_days_after_post", 14)
+    for folder, job in jobs_in("posted"):
+        if job.get("cleaned") or time.time() - job.get("posted_at", time.time()) < days * 86400:
+            continue
+        jd = os.path.join(DIRS["work"], job["name"])
+        for junk in ("segments", "body.mov", "end_card.mov", "audio16k.wav"):
+            p = os.path.join(jd, junk)
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+            elif os.path.exists(p):
+                os.remove(p)
+        job["cleaned"] = time.time()
+        write_json(info(folder, "job.json"), job)
+
+
+def check_queue():
+    """Once a day: warn when nothing is scheduled for the next posting slot (1 video a week)."""
+    stamp = os.path.join(DIRS["logs"], "queue_warning.txt")
+    today = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(stamp) and open(stamp).read().strip() == today:
+        return
+    slot = next_slot()
+    upcoming = [j for _, j in jobs_in("scheduled") + jobs_in("approved") if j.get("slot")]
+    if len(upcoming) >= acfg().get("warn_when_queue_below", 1):
+        return
+    waiting = len(jobs_in("review"))
+    msg = "Nothing scheduled for %s. " % slot.strftime("%a %d %b")
+    msg += ("%d episode(s) waiting in 2 Review." % waiting) if waiting else "Time to record the next episode."
+    notify("Queue empty", msg)
+    with open(stamp, "w") as f:
+        f.write(today)
+
+
+def sync_scripts():
+    """Once an hour: pull changed scripts from Drive (silently skipped until `hbb.py auth drive` was run)."""
+    stamp = os.path.join(DIRS["logs"], "scripts_sync.txt")
+    if os.path.exists(stamp) and time.time() - os.path.getmtime(stamp) < 3600:
+        return
+    with open(stamp, "w") as f:
+        f.write(datetime.now().isoformat())
+    if not os.path.exists(os.path.join(pub.SECRETS, "drive_token.json")):
+        return
+    scripts.sync(acfg().get("drive_scripts_folder"), log=log)
+
+
+def tick():
+    for d in DIRS.values():
+        os.makedirs(d, exist_ok=True)
+    lock = open(os.path.join(DIRS["logs"], "hbb.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return  # another tick is still working (a render takes a while)
+    for step in (process_approved, process_scheduled, sync_scripts, process_changes, process_inbox, cleanup_posted, check_queue):
+        try:
+            step()
+        except Exception:
+            log(traceback.format_exc())
+
+
+# ---------------------------------------------------------------- commands
+
+def status():
+    for stage in ("review", "approved", "scheduled", "posted"):
+        for folder, job in jobs_in(stage):
+            line = "%-10s %-48s" % (stage, os.path.basename(folder))
+            if job.get("slot"):
+                line += " slot %s" % datetime.fromisoformat(job["slot"]).strftime("%a %d %b %H:%M")
+            if (job.get("youtube") or {}).get("url"):
+                line += "  " + job["youtube"]["url"]
+            if job.get("error"):
+                line += "  ERROR: " + job["error"][:80]
+            print(line)
+    inbox = [p for p in glob.glob(os.path.join(DIRS["inbox"], "*")) if not os.path.basename(p).startswith(".")]
+    print("inbox: %d item(s)" % len(inbox))
+    print("next free slot:", next_slot().strftime("%a %d %b %Y %H:%M %Z"))
+
+
+def run_now(path, episode=None):
+    job = os.path.splitext(os.path.basename(path.rstrip("/")))[0] if os.path.isfile(path) else os.path.basename(path.rstrip("/"))
+    jd = editor.analyze(path, job=job, episode=episode, log=log)
+    draft = read_json(os.path.join(jd, "draft.json"))
+    ep = "EP.%02d" % draft["episode"] if draft.get("episode") else "EP.xx"
+    summary = edit_and_render(job)
+    print(to_review(job, ep, summary))
+
+
+def rerender(folder_name):
+    folder = os.path.join(DIRS["review"], folder_name)
+    job = read_json(info(folder, "job.json"))
+    if not job:
+        sys.exit("not found in 2 Review: " + folder_name)
+    shutil.copy(info(folder, "post.json"), os.path.join(DIRS["work"], job["name"], "post.json"))
+    edit_path = os.path.join(DIRS["work"], job["name"], "edit.json")
+    edit = read_json(edit_path)
+    edit["broll_dirs"] = [os.path.join(folder, "B-roll")]
+    write_json(edit_path, edit)
+    editor.render(job["name"], log=log)
+    print(to_review(job["name"], job["episode"], job.get("summary", "")))
+
+
+def retry(folder_name):
+    for stage in ("approved", "scheduled", "review"):
+        f = info(os.path.join(DIRS[stage], folder_name), "job.json")
+        job = read_json(f)
+        if job:
+            job.update(error=None, attempts=0)
+            write_json(f, job)
+            print("reset", folder_name)
+            return
+    sys.exit("not found: " + folder_name)
+
+
+def install():
+    py = os.path.join(PIPE, ".venv", "bin", "python")
+    watch = "".join("<string>%s</string>" % DIRS[k] for k in ("inbox", "review", "approved"))
+    plist = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>%s</string>
+  <key>ProgramArguments</key><array><string>%s</string><string>%s</string><string>tick</string></array>
+  <key>StartInterval</key><integer>300</integer>
+  <key>WatchPaths</key><array>%s</array>
+  <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>%s</string>
+  <key>StandardErrorPath</key><string>%s</string>
+</dict></plist>
+""" % (AGENT, py, os.path.realpath(__file__), watch,
+       os.path.join(DIRS["logs"], "agent.out.log"), os.path.join(DIRS["logs"], "agent.err.log"))
+    for d in DIRS.values():
+        os.makedirs(d, exist_ok=True)
+    with open(PLIST, "w") as f:
+        f.write(plist)
+    subprocess.run(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), AGENT)], capture_output=True)
+    subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), PLIST], check=True)
+    print("autopilot installed:", PLIST)
+
+
+def uninstall():
+    subprocess.run(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), AGENT)], capture_output=True)
+    if os.path.exists(PLIST):
+        os.remove(PLIST)
+    print("autopilot removed")
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if a[:1] == ["tick"]:
+        tick()
+    elif a[:1] == ["status"]:
+        status()
+    elif a[:1] == ["auth"] and len(a) == 2 and a[1] in ("youtube", "drive"):
+        print(pub.auth(a[1]))
+    elif a[:1] == ["scripts"]:
+        print("updated:", scripts.sync(acfg().get("drive_scripts_folder"), log=log) or "nothing new")
+    elif a[:1] == ["run"] and len(a) >= 2:
+        run_now(a[1], int(a[a.index("--episode") + 1]) if "--episode" in a else None)
+    elif a[:1] == ["rerender"] and len(a) == 2:
+        rerender(a[1])
+    elif a[:1] == ["retry"] and len(a) == 2:
+        retry(a[1])
+    elif a[:1] == ["install"]:
+        install()
+    elif a[:1] == ["uninstall"]:
+        uninstall()
+    else:
+        print(__doc__)
