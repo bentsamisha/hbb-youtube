@@ -360,51 +360,60 @@ class Show:
         Scene(self, "L", t0, t1, draw)
 
     def g_brand(self, g, t0, t1):
+        """Compact company card, bottom-left and low, so it stays clear of his face and body; content centred inside."""
         b = self.cfg["brand"]
+        lines = [text("HoneyBadger & Bees", "serif", 38, 700, NAVY), label("Technologies", GREY, 15),
+                 runs(((b.get("tagline_a", "Enterprise compliance, "), NAVY),
+                       (b.get("tagline_b", "without the enterprise headache."), GOLD)), "sans", 21, 500)]
+        inks = []
+        for sp in lines:  # tight ink rows, so the block centres on what you see, not on the font's padding
+            rows = np.where(sp[..., 3].max(axis=1) > 20)[0]
+            inks.append((int(rows[0]), int(rows[-1]) + 1) if len(rows) else (0, sp.shape[0]))
+        gaps = [10, 12]
+        col_h = sum(b1 - b0 for b0, b1 in inks) + sum(gaps)
+        col_w = max(sp.shape[1] for sp in lines) - 4
+        mark = logo("icon", 78)
+        pad, gap, ch = 30, 24, 128
+        cw = int(pad + mark.shape[1] + gap + col_w + pad)
+        x0, y0 = 46, H - 40 - ch
 
         def draw(frame, t, sc):
             e = ease_out(ramp(t, t0 + 0.1, 0.5)) * sc.fade(t)
             if e <= 0:
                 return
-            blend(frame, rrect(1080, 200, 18, CREAM, 245, shadow=12), MX - 20, H - 330, e, reveal=e)
-            blend(frame, logo("icon", 120), MX + 6, H - 290, e)
-            blend(frame, text("HoneyBadger & Bees", "serif", 54, 700, NAVY), MX + 240, H - 300, e)
-            blend(frame, label("Technologies", GREY, 20), MX + 244, H - 232, e)
-            blend(frame, runs(((b.get("tagline_a", "Enterprise compliance, "), NAVY),
-                               (b.get("tagline_b", "without the enterprise headache."), GOLD)), "sans", 28, 500),
-                  MX + 240, H - 196, e)
+            dy = (1 - e) * 24
+            blend(frame, rrect(cw, ch, 16, CREAM, 245, shadow=10), x0 - 20, y0 - 20 + dy, e, reveal=e)  # sprite has 20 px shadow padding
+            blend(frame, mark, x0 + pad, y0 + (ch - mark.shape[0]) / 2 + dy, e)
+            cx, y = x0 + pad + mark.shape[1] + gap, y0 + (ch - col_h) / 2 + dy
+            for k, (sp, (i0, i1)) in enumerate(zip(lines, inks)):
+                blend(frame, sp, cx + (3 if k == 1 else 0), y - i0, e)
+                y += (i1 - i0) + (gaps[k] if k < 2 else 0)
         Scene(self, "L", t0, t1, draw)
 
     def g_subscribe(self, g, t0, t1):
-        sub = no_em(g.get("text", "for practical, no-headache compliance"))
-
+        """Just the Subscribe button, bottom-right in the empty space: a cursor clicks it, it turns to Subscribed."""
         def draw(frame, t, sc):
             e = ease_out(ramp(t, t0, 0.4)) * sc.fade(t)
             if e <= 0:
                 return
-            ts = text(sub, "sans", 32, 500, CREAM)
-            bw, bh, ch = 300, 80, 128
-            cw = 30 + bw + 30 + ts.shape[1] + 40
-            x0, y0 = MX - 20, H - 120 - ch
-            cyc = y0 + ch / 2
-            blend(frame, rrect(cw, ch, 18, NAVY, 236, shadow=10), x0 - 20, y0 - 20, e)
+            bw, bh = 300, 84
+            bx, cyc = W - 70 - bw / 2, H - 70 - bh / 2
             t_click = t0 + 1.3
             press = 1 - 0.08 * math.sin(math.pi * clamp((t - t_click) / 0.25))
             pulse = 1 + 0.04 * math.sin(max(0.0, t - t_click - 0.4) * 5.0) * (t > t_click + 0.4)
             bs = (0.7 + 0.3 * e) * press * pulse
-            bx = x0 + 30 + bw / 2
             clicked = t >= t_click + 0.12
-            blend(frame, rrect(bw, bh, bh // 2, (150, 40, 32) if clicked else RED, shadow=8), bx, cyc, e, scale=bs, anchor="c")
-            blend(frame, text("Subscribed" if clicked else "Subscribe", "sans", 38, 700, WHITE), bx, cyc + 1, e, scale=bs,
+            blend(frame, rrect(bw, bh, bh // 2, (150, 40, 32) if clicked else RED, shadow=14), bx, cyc, e, scale=bs,
+                  anchor="c")
+            blend(frame, text("Subscribed" if clicked else "Subscribe", "sans", 40, 700, WHITE), bx, cyc + 1, e, scale=bs,
                   anchor="c")
             rp = clamp((t - t_click) / 0.6)
             if 0 < rp < 1:
                 blend(frame, rrect(bw, bh, bh // 2, None, stroke=WHITE, sw=4), bx, cyc, (1 - rp) * e, scale=1 + 0.35 * rp,
                       anchor="c")
-            blend(frame, ts, x0 + 30 + bw + 30, cyc, e, anchor="lc")
             mv = ease_in_out(ramp(t, t0 + 0.4, 0.8))
             ca = e * (1 - ramp(t, t_click + 1.4, 0.4))
-            blend(frame, cursor(46), bx + 260 * (1 - mv) + 8, cyc + 140 * (1 - mv) - 10, ca,
+            blend(frame, cursor(46), bx - 220 * (1 - mv) + 8, cyc - 150 * (1 - mv) - 10, ca,
                   scale=0.9 if abs(t - t_click - 0.1) < 0.12 else 1.0)
         Scene(self, "L", t0, t1, draw)
 
@@ -881,6 +890,34 @@ def build_voice(source, clips, fps, out, cfg, tail):
     os.remove(gpath)
 
 
+def mix_music(voice, voice_end, endsec, cfg):
+    """The channel's own generated music under the voice (assets/music, never claimed by Content ID):
+    a calm bed under the talk, then a track that builds from soft and filtered to full during the next-video tease,
+    lands its drop on the end card and plays under it. Ducked under the voice."""
+    m = cfg.get("music") or {}
+    if not m.get("on", True):
+        return
+    here = os.path.dirname(os.path.abspath(__file__))
+    bed, rise = (os.path.join(here, m.get(k, "assets/music/%s.m4a" % k)) for k in ("bed", "rise"))
+    if not (os.path.exists(bed) and os.path.exists(rise)):
+        return
+    rs = max(0.0, voice_end - float(m.get("rise_drop", 20.0)))
+    total = voice_end + endsec + 1
+    graph = ("[0:a]asplit=2[v][sc];"
+             "[1:a]atrim=0:%.3f,volume=%.3f,afade=t=in:d=2,afade=t=out:st=%.3f:d=2.5[b];"
+             "[2:a]volume=%.3f,afade=t=in:d=1.5,adelay=%d|%d,afade=t=out:st=%.3f:d=3[r];"
+             "[b][r]amix=inputs=2:normalize=0:duration=longest[m];"
+             "[m][sc]sidechaincompress=threshold=%.3f:ratio=%g:attack=40:release=650[md];"
+             "[v][md]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[out]") % (
+        rs + 0.5, m.get("bed_volume", 0.12), max(0.0, rs - 2.0), m.get("rise_volume", 0.25),
+        int(rs * 1000), int(rs * 1000), total - 3.5, m.get("duck_threshold", 0.03), m.get("duck_ratio", 6))
+    tmp = voice + ".mix.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice, "-stream_loop", "-1", "-i", bed, "-i", rise,
+                    "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s24le", tmp],
+                   check=True)
+    os.replace(tmp, voice)
+
+
 def encoder(cfg):
     enc = cfg["output"].get("encoder", "auto")
     if enc == "auto":
@@ -912,6 +949,7 @@ def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=prin
     voice = os.path.join(os.path.dirname(out), "voice.wav")
     if not stills:
         build_voice(edit["source"], clips, fps, voice, cfg, endsec + 1)
+        mix_music(voice, voice_end, endsec, cfg)
         enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (W, H),
                                 "-r", str(fps), "-i", "-", "-ss", "%.3f" % t_from, "-t", "%.3f" % (t_to - t_from),
                                 "-i", voice, "-vf", "scale=out_color_matrix=bt709:out_range=tv"] + encoder(cfg) +

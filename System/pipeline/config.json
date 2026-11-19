@@ -142,5 +142,15 @@
   "drive_scripts_folder": "1_hjuLz5ZJZ_HKQNC2s3MZZgnqQHGevTx",
   "warn_when_queue_below": 1,
   "keep_raw_days_after_post": 14
+ },
+ "music": {
+  "on": true,
+  "bed": "assets/music/bed.m4a",
+  "rise": "assets/music/rise.m4a",
+  "rise_drop": 20.0,
+  "bed_volume": 0.12,
+  "rise_volume": 0.25,
+  "duck_threshold": 0.03,
+  "duck_ratio": 6
  }
 }
