@@ -6,7 +6,7 @@ Same idea as Trust No Pack. Every login file goes into `HBB/System/secrets/` (ne
 ```bash
 cd ~/HBB/System/pipeline && ./setup.sh
 ```
-Needs `ffmpeg` with libass (`brew install ffmpeg`) - TNP's ffmpeg works.
+Needs `ffmpeg` (`brew install ffmpeg`) - TNP's ffmpeg works. The venv is built on the Mac's own Python 3.9 (`/usr/bin/python3`), like TNP.
 
 ## 2. Claude login for the background editor
 If TNP already runs, reuse its token:
