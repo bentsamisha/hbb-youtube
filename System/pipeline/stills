@@ -1,0 +1,6 @@
+#!/bin/sh
+# Render single frames of an edit to check the graphics: System/pipeline/stills "<job>" 12.5,40,95  (source seconds)
+D="$(cd "$(dirname "$0")" && pwd)"
+PY="$D/.venv/bin/python3"
+[ -x "$PY" ] || PY=python3
+exec "$PY" "$D/editor.py" stills "$1" "$2"

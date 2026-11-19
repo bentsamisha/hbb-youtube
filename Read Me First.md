@@ -15,8 +15,8 @@
 | **System** | The machinery: pipeline code, work files, logins (`secrets`), logs. No need to open it. |
 
 ## Inside an episode folder
-- `EP.NN Name.mp4`: the finished video (4K, captions, on-screen text, name card, end screen)
+- `EP.NN Name.mp4`: the finished video (1080p, in the EP.11 v3 look: cards, split screens, explainers, end screen)
 - `cover.jpg`: the thumbnail (cream panel, serif text, one honey-gold word, your face, logo)
 - `YOUTUBE.txt`: 3 ranked titles, the full description with exact timestamps, tags, pinned comment, card times, end screen
-- `B-ROLL.txt` + `B-roll/`: the B-roll shots from the script with their prompts; drop `broll_01.mp4` ... into `B-roll/`
+- `B-ROLL.txt` + `B-roll/`: the script's B-roll prompts (explainers cover them; drop `broll_01.mp4` ... into `B-roll/` only if you want real footage)
 - `Additional info/`: subtitles, `post.json` (master text; edit it to change titles or description), `edit.json`, Claude's notes
