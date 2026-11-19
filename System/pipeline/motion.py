@@ -431,10 +431,12 @@ class Show:
                 put(frame, ns, MX + 22, y, t, tin, sc)
                 y += ns.shape[0] + 18
             elif key == "tag":
-                tg = text(no_em(x["text"]), "sans", 30, 600, NAVY, max_w=PW - 2 * MX - 40)
+                tg = text(no_em(x["text"]), "sans", 30, 600, NAVY, max_w=PW - 2 * MX - 40, align="center")
+                inner = int((tg.shape[1] - 16) / 1.06)  # real ink width: text() pads its sprite on the right
                 al, dy = pop(t, tin)
-                blend(frame, rrect(tg.shape[1] + 36, tg.shape[0] + 16, 26, GOLD), MX, y + dy, al * sc.fade(t))
-                blend(frame, tg, MX + 18, y + 8 + dy, al * sc.fade(t))
+                pw, ph = inner + 56, tg.shape[0] + 16
+                blend(frame, rrect(pw, ph, 26, GOLD), MX, y + dy, al * sc.fade(t))
+                blend(frame, tg, MX + pw / 2, y + ph / 2 + dy, al * sc.fade(t), anchor="c")
                 y += tg.shape[0] + 40
             else:
                 p = ease_out(ramp(t, tin, 0.4))
@@ -454,8 +456,9 @@ class Show:
         n = max(1, len(items))
         room = 930 - 330 - (110 if any(g.get(k) for k in ("note", "tag", "stamp")) else 0)
         base = {"verdict": 170, "number": 150, "check": 92, "dot": 80}.get(style, 130 if has_sub else 98)
-        step = min(base + (32 if has_sub and style in ("number", "check", "dot") else 0), room / n)
-        big = 46 if style == "verdict" else 42 if n <= 5 else 36
+        # short lists spread out to use the panel's height (then the whole panel is centred, see panel_offset)
+        step = min((base + (32 if has_sub and style in ("number", "check", "dot") else 0)) * 1.7, room / n)
+        big = 46 if style == "verdict" or n <= 3 else 42 if n <= 5 else 36
 
         def draw(frame, t, sc):
             yt = self.panel_title(frame, t, sc, t0 + 0.2, g.get("kicker"), g.get("title", ""))
@@ -688,6 +691,34 @@ class Show:
         f = max([sc.env(t, 0.3) for sc in self.scenes if sc.kind == "F" and sc.t0 - 0.1 <= t <= sc.t1 + 0.1] + [0])
         return s, f
 
+    def panel_offset(self, sc):
+        """Split panels are laid out from the top; measure the fully built panel once and centre it vertically,
+        so a short list or card doesn't leave the lower half of the panel empty."""
+        if getattr(sc, "dy", None) is None:
+            canvas = np.empty((H, PW, 3), np.uint8)
+            canvas[:] = CREAM
+            sc.draw(canvas, max(sc.t0 + 0.6, sc.t1 - sc.tail - 0.4), sc)
+            rows = np.where(np.any(np.abs(canvas.astype(np.int16) - np.array(CREAM, np.int16)) > 12, axis=(1, 2)))[0]
+            if len(rows):
+                top, bot = int(rows[0]), int(rows[-1])
+                sc.dy = int(max(0, min((H - (bot - top)) / 2 - top, H - 90 - bot)))
+            else:
+                sc.dy = 0
+        return sc.dy
+
+    def draw_panel(self, frame, t, sc):
+        dy = self.panel_offset(sc)
+        if dy <= 0:
+            sc.draw(frame, t, sc)
+            return
+        canvas = np.empty((H, PW, 3), np.uint8)
+        canvas[:] = CREAM
+        sc.draw(canvas, t, sc)
+        region = frame[dy:, :PW]
+        src = canvas[:H - dy]
+        mask = np.any(src != np.array(CREAM, np.uint8), axis=2)
+        region[mask] = src[mask]
+
     def draw(self, frame, t):
         s, f = self.camera_state(t)
         if s > 0:
@@ -704,7 +735,10 @@ class Show:
                     continue
                 if sc.kind == "S" and sc.env(t) < 0.6 and t < sc.t0 + 0.5:
                     continue
-                sc.draw(frame, t, sc)
+                if sc.kind == "S":
+                    self.draw_panel(frame, t, sc)
+                else:
+                    sc.draw(frame, t, sc)
         if f < 0.5:
             self.draw_tracker(frame, t)
 

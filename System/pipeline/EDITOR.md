@@ -25,6 +25,8 @@ Read first, every time:
 ## 1. `edit.json`: start from a copy of draft.json, then fix it
 Keep every field of draft.json (source, info, rows, ...); change only what needs changing.
 - **Check every row.** Compare the transcript around each row's `start`-`end` with the script text.
+  - Use the LAST complete take (Mykhailo's rule). Never join a sentence from two takes, and never keep a moment where
+    he looks down: check a frame just before every range end and just after every range start (see EDITOR_NOTES.md).
   - The best take is normally the LAST complete one. If the draft picked a take with a stumble ("the the", a wrong
     word, a restart in the middle), pick another take of that row from the transcript and rewrite the `keep` ranges for it.
   - A row with `start: null` was not found: search the transcript for it (he may have paraphrased). If he really
