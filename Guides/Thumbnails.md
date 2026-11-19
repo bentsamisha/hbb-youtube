@@ -15,3 +15,7 @@ earlier thumbnails, so the face and style stay the same). The link is in `System
 and delete THUMBNAIL.jpg. You can also drop your own THUMBNAIL.jpg/.png into the folder; it wins.
 
 **What Mykhailo needs**: the Chrome window with the Claude extension signed in to ChatGPT (the account that owns the chat).
+
+**How the image gets into the folder**: Claude saves it from the chat through Chrome as
+`~/Downloads/HBB_<episode>_THUMBNAIL.jpg` (1280x720). The autopilot moves it into that episode's folder as
+`THUMBNAIL.jpg` within 5 minutes, marks the queue item done and sends a notification.

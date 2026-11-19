@@ -816,9 +816,46 @@ def sync_scripts():
     scripts.sync(acfg().get("drive_scripts_folder"), log=log)
 
 
+def collect_thumbnails():
+    """Claude saves the ChatGPT thumbnail through Chrome as ~/Downloads/HBB_<episode>_THUMBNAIL.jpg; move it into
+    that episode's folder (any stage before posting) as THUMBNAIL.jpg and mark the queue item done."""
+    dl = os.path.expanduser("~/Downloads")
+    for p in sorted(glob.glob(os.path.join(dl, "HBB_*_THUMBNAIL*.*"))):
+        m = re.match(r"HBB_(.+?)_THUMBNAIL.*\.(jpe?g|png)$", os.path.basename(p), re.I)
+        if not m or not stable(p, 10):
+            continue
+        ep = m.group(1)
+        target = None
+        for stage in ("review", "approved", "scheduled"):
+            for folder, job in jobs_in(stage):
+                if job.get("episode") == ep:
+                    target = folder
+        if not target:
+            continue
+        for old in glob.glob(os.path.join(target, "THUMBNAIL.*")):
+            os.remove(old)
+        ext = ".png" if m.group(2).lower() == "png" else ".jpg"
+        shutil.move(p, os.path.join(target, "THUMBNAIL" + ext))
+        q = read_json(thumb_queue_path(), []) or []
+        for x in q:
+            if x.get("episode") == ep and x.get("status") == "todo":
+                x.update(status="done", done=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        write_json(thumb_queue_path(), q)
+        try:
+            write_upload_kit(target)
+        except Exception as e:
+            log("thumbnail kit:", e)
+        log("thumbnail: %s -> %s" % (os.path.basename(p), os.path.basename(target)))
+        notify("Thumbnail added", "%s: THUMBNAIL%s is in the folder" % (ep, ext))
+
+
 def tick():
     for d in DIRS.values():
         os.makedirs(d, exist_ok=True)
+    try:
+        collect_thumbnails()  # quick file move, runs even while a long edit holds the lock
+    except Exception:
+        log(traceback.format_exc())
     lock = open(os.path.join(DIRS["logs"], "hbb.lock"), "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
