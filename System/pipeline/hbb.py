@@ -16,7 +16,7 @@ Folders (in HBB/):
                 - move the folder into "3 Approved" to schedule it, or
                 - write what to change into CHANGES.txt inside the folder (Claude re-edits it), or
                 - drop B-roll clips into its "B-roll" folder as broll_01.mp4, broll_02.mp4 ... (re-rendered automatically)
-  3 Approved    uploaded to YouTube on the next tick, scheduled for the next free slot (Mondays 09:00 Lisbon by default)
+  3 Approved    uploaded to YouTube on the next tick, scheduled for the next free slot (Thursdays 09:00 Lisbon by default)
   4 Scheduled   uploaded and waiting for its publish time (YouTube publishes it itself, the Mac can be off)
   5 Posted      live; "Additional info/job.json" has the link
 """
@@ -314,7 +314,7 @@ SETTINGS (set automatically on upload)
 - Category: Education
 - Visibility: Schedule > {when}
 
-LinkedIn hook idea for Monday: {li}
+LinkedIn hook idea for publish day: {li}
 """.format(ep=job.get("episode", ""), when=when, line=line, title=yt["title"], alts=alts, desc=yt["description"],
            tags=", ".join(yt["tags"]), pinned=editor.no_em_dash(post.get("pinned_comment", "")), cards=cards, ends=ends,
            end_s=c["end_screen_seconds"], end_at=editor.mmss(tl.duration), video=os.path.basename(main_video(folder) or "video.mp4"),
@@ -467,7 +467,7 @@ def next_slot(now=None, exclude=None):
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     earliest = now + timedelta(minutes=acfg().get("min_lead_minutes", 90))
     taken = taken_slots(exclude)
-    times = acfg().get("post_times") or {"mon": ["09:00"]}
+    times = acfg().get("post_times") or {"thu": ["09:00"]}
     for day in range(0, 120):
         d = (now + timedelta(days=day)).date()
         for hm in sorted(times.get(DAYS[d.weekday()], [])):
