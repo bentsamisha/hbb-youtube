@@ -3,6 +3,7 @@
   editor.py analyze <video or folder> [--episode N]   transcribe, match the script, write System/work/<job>/draft.json
   editor.py render <job>                              render System/work/<job>/edit.json (or draft.json) to final.mp4
   editor.py sample <job> <from> <to>                  render only a piece (output seconds) to check the look
+  editor.py stills <job> <src sec,src sec,...>        render single frames to System/work/<job>/stills/ to check graphics
 
 Work folder System/work/<job>/:
   source.mp4        the raw footage (several camera clips are joined in name order)
@@ -223,7 +224,8 @@ def analyze(src, job=None, episode=None, log=print):
         log("transcribing %s (%.0f s of footage)" % (job, info["duration"]))
         run(["ffmpeg", "-v", "error", "-y", "-i", source, "-vn", "-ac", "1", "-ar", "16000", wav])
         words = transcribe(wav, cfg)
-        write_json(os.path.join(jd, "words.json"), words)
+        # word times trimmed to the real pauses, saved, so the cut, the captions and the graphics all agree
+        write_json(os.path.join(jd, "words.json"), snap_words(words, silences(source, cfg)))
     words = apply_fixes(read_json(os.path.join(jd, "words.json")), cfg.get("fixes", []))
     write_transcript(words, os.path.join(jd, "transcript.txt"))
     sil = silences(source, cfg)
@@ -275,6 +277,9 @@ def find_takes(wn, row_tokens, min_score):
     return sorted(picked, key=lambda c: c[1])
 
 
+FILLERS = {"and", "so", "um", "uh", "okay", "ok", "again", "sorry"}
+
+
 def inner_retakes(seg_words, min_len=4):
     """Inside one take: he repeats a phrase ("this is the most... this is the most common question").
     Returns [i0, i1) word ranges to drop (the abandoned first attempt)."""
@@ -289,15 +294,39 @@ def inner_retakes(seg_words, min_len=4):
                 hit = j
                 break
         if hit is not None:
-            drops.append((i, hit))
+            # he usually pauses, then restarts a little BEFORE the repeated words ("...27001. [pause] I'm Mykhailo
+            # Bentsa, certified..."): drop only up to that pause, so the restart's opening words stay
+            cut = hit
+            gaps = [(seg_words[k]["s"] - seg_words[k - 1]["e"], k) for k in range(i + 1, hit)]
+            if gaps and max(gaps)[0] >= 0.5:
+                cut = max(gaps)[1]
+                while cut < hit and toks[cut] in FILLERS:
+                    cut += 1
+            drops.append((i, cut))
             i = hit
         else:
             i += 1
     return drops
 
 
+def snap_words(words, sil):
+    """Whisper often stretches a word over the pause after it ("27001" lasting 1.9 s). Trim word ends (and starts)
+    to the detected silences, so pauses can be cut and retake restarts are found."""
+    out = []
+    for w in words:
+        s, e = w["s"], w["e"]
+        for a, b in sil:
+            if s + 0.12 < a < e:
+                e = min(e, a + 0.05)
+            if s < b < e - 0.12 and a <= s + 0.05:
+                s = max(s, b - 0.05)
+        out.append(dict(w, s=round(s, 3), e=round(max(e, s + 0.05), 3)))
+    return out
+
+
 def auto_edit(words, sil, sc, info, cfg):
     cut = cfg["cut"]
+    words = snap_words(words, sil or [])
     idx = [i for i, w in enumerate(words) if mtok(w["w"])]
     wn = [mtok(words[i]["w"]) for i in idx]
     rows = []
@@ -348,10 +377,20 @@ def auto_edit(words, sil, sc, info, cfg):
         if run_start is not None:
             last = seg[max(i for i in range(len(seg)) if i not in drop)]
             keep.append([run_start, last["e"] + cut["pad_after"]])
+    # padding must never reach into a dropped word (the "I-" of an abandoned take)
+    starts = sorted(w["s"] for w in words)
+    ends = sorted(w["e"] for w in words)
+    for r in keep:
+        clip = [s0 for s0 in starts if r[1] - cut["pad_after"] - 0.001 < s0 < r[1]]
+        if clip:
+            r[1] = max(r[1] - cut["pad_after"], clip[0] - 0.02)
+        clip = [e0 for e0 in ends if r[0] < e0 < r[0] + cut["pad_before"] + 0.001]
+        if clip:
+            r[0] = min(r[0] + cut["pad_before"], clip[-1] + 0.02)
     keep = merge_ranges([[max(0.0, round(a, 3)), round(min(b, info["duration"]), 3)] for a, b in keep])
     zooms = default_zooms(keep, rows, cfg)
-    return {"keep": keep, "rows": rows, "zoom": zooms, "overlays": cue_overlays(rows, cfg),
-            "broll": cue_broll(rows), "cards": cue_cards(rows), "lower_thirds": cue_lower_thirds(rows, cfg)}
+    return {"keep": keep, "rows": rows, "zoom": zooms, "graphics": cue_graphics(rows, cfg),
+            "broll": cue_broll(rows), "cards": cue_cards(rows)}
 
 
 def merge_ranges(rs, gap=0.05):
@@ -382,15 +421,37 @@ def default_zooms(keep, rows, cfg):
     return z
 
 
-def cue_overlays(rows, cfg):
-    out = []
+NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6}
+
+
+def cue_graphics(rows, cfg):
+    """A first, mechanical graphics pass from the script's Details column (the Claude editor rewrites it with phrase
+    anchors and full-screen explainers; see EDITOR.md). Times are source seconds."""
+    out, first = [], True
     for r in rows:
-        on = r["cues"].get("onscreen")
-        if not on or r.get("start") is None:
+        if r.get("start") is None:
             continue
-        dur = r["end"] - r["start"]
-        out.append({"t": round(r["start"] + 0.4, 2), "dur": round(min(max(4.0, dur - 0.6), 9.0), 2), "lines": on,
-                    "accent": r["cues"].get("accent", []), "row": r["i"]})
+        cues, t0, t1 = r["cues"], r["start"], r["end"]
+        m = re.match(r"\s*Group (?:number )?(one|two|three|four|five|six|[1-6])\b[.,:]?\s*(.*?)[.?!]", r["text"], re.I)
+        if m:
+            out.append({"type": "chapter", "at": t0, "num": NUM[m.group(1).lower()], "title": m.group(2).strip()[:48]})
+        if re.search(r"\bI'm Mykhailo\b", r["text"]) or cues.get("lower_third") == "name":
+            out.append({"type": "name", "at": round(t0 + 0.6, 2), "dur": 6.0})
+        on = cues.get("onscreen") or []
+        if len(on) >= 2:
+            items = [{"text": re.sub(r"^\d+[.)]\s*", "", x)} for x in on]
+            numbered = all(re.match(r"^\d+[.)]", x) for x in on)
+            out.append({"type": "list", "at": round(t0 + 0.3, 2), "until": t1, "style": "number" if numbered else "dot",
+                        "kicker": "In this video" if numbered else "", "title": "", "items": items})
+        elif len(on) == 1:
+            kind = "title" if first else "lower"
+            out.append({"type": kind, "at": round(t0 + 0.4, 2), "dur": 7.0 if first else 6.0, "title": on[0],
+                        "accent": cues.get("accent", [])})
+        if re.search(r"linkedin", r["text"], re.I):
+            out.append({"type": "linkedin", "at": round(t0 + 0.3, 2), "dur": 5.0})
+        if re.search(r"subscribe", r["text"], re.I):
+            out.append({"type": "subscribe", "at": round(t0 + 0.3, 2), "dur": 5.0})
+        first = False
     return out
 
 
@@ -409,21 +470,6 @@ def cue_broll(rows):
 def cue_cards(rows):
     return [{"t": r["start"], "what": r["cues"]["card"], "row": r["i"]} for r in rows
             if r["cues"].get("card") and r.get("start") is not None]
-
-
-def cue_lower_thirds(rows, cfg):
-    out = []
-    for r in rows:
-        lt = r["cues"].get("lower_third")
-        if lt and r.get("start") is not None:
-            out.append({"t": round(r["start"] + 0.8, 2), "dur": 5.0, "kind": "name" if lt == "name" else "company"})
-    if not any(x["kind"] == "name" for x in out):
-        # the intro line ("I'm Mykhailo Bentsa...") always gets the name card
-        for r in rows:
-            if r.get("start") is not None and re.search(r"\bI'm Mykhailo\b", r["text"]) and "Bentsa" in r["text"]:
-                out.append({"t": round(r["start"] + 0.8, 2), "dur": 5.0, "kind": "name"})
-                break
-    return sorted(out, key=lambda x: x["t"])
 
 
 # ---------------------------------------------------------------- timeline
@@ -456,107 +502,7 @@ class Timeline:
 
 # ---------------------------------------------------------------- 3. render
 
-def encoder_args(cfg, final=False):
-    enc = cfg["output"].get("encoder", "auto")
-    if enc == "auto":
-        encs = run(["ffmpeg", "-hide_banner", "-encoders"])
-        enc = "h264_videotoolbox" if "h264_videotoolbox" in encs else "libx264"
-    if enc == "h264_videotoolbox":
-        return ["-c:v", "h264_videotoolbox", "-b:v", cfg["output"]["bitrate"] if final else "60M", "-allow_sw", "1"]
-    return ["-c:v", "libx264", "-preset", cfg["output"].get("preset", "medium") if final else "veryfast",
-            "-crf", str(cfg["output"]["crf"] if final else 14)]
-
-
-def out_size(info, cfg):
-    h = min(cfg["output"]["height"], info["height"])
-    w = int(round(info["width"] * h / info["height"] / 2) * 2)
-    return w, h
-
-
-def zoom_filter(kind, seg_dur, w, h, cfg, z_static=1.0):
-    """Scale+crop for one segment. kind: None (static at z_static), 'slow_in', 'slow_out'."""
-    look = cfg["look"]
-    fx, fy = look["face_x"], look["face_y"]
-    amt = look["slow_zoom"]
-    if kind in ("slow_in", "slow_out"):
-        d = max(seg_dur, 0.5)
-        z = "(%f+%f*t/%f)" % (z_static, amt, d) if kind == "slow_in" else "(%f-%f*t/%f)" % (z_static + amt, amt, d)
-        return ("scale=w='trunc(%d*%s/2)*2':h='trunc(%d*%s/2)*2':eval=frame,"
-                "crop=%d:%d:x='(in_w-%d)*%f':y='(in_h-%d)*%f'" % (w, z, h, z, w, h, w, fx, h, fy))
-    if abs(z_static - 1.0) > 1e-3:
-        sw, sh = int(w * z_static / 2) * 2, int(h * z_static / 2) * 2
-        return "scale=%d:%d,crop=%d:%d:%d:%d" % (sw, sh, w, h, int((sw - w) * fx), int((sh - h) * fy))
-    return "scale=%d:%d" % (w, h)
-
-
-def segment_plan(edit, cfg):
-    """Each kept range -> (start, end, zoom kind, static zoom). Punch-in alternates where a cut skips a retake
-    or a long pause, so the jump cut looks intentional; slow zooms follow the script cues."""
-    punch = cfg["look"]["zoom_punch"]
-    plan, level = [], 1.0
-    prev_end = None
-    fps = cfg["output"].get("fps") or edit["info"]["fps"]
-    for a, b in edit["keep"]:
-        # whole frames only, so video and audio of every piece are exactly as long (no drift over 100+ cuts)
-        a, b = round(a * fps) / fps, round(b * fps) / fps
-        kind = None
-        for zc in edit.get("zoom", []):
-            if zc["t0"] - 0.3 <= a <= zc["t1"] and zc["kind"] in ("slow_in", "slow_out"):
-                kind = zc["kind"]
-            if zc["t0"] - 0.3 <= a <= zc["t1"] and zc["kind"] == "in":
-                level = punch
-        if prev_end is not None and a - prev_end > cfg["look"]["punch_after_gap"]:
-            level = punch if level == 1.0 else 1.0
-        plan.append((a, b, kind, level))
-        prev_end = b
-    return plan
-
-
-def cut_segments(jd, edit, cfg, w, h, fps):
-    seg_dir = os.path.join(jd, "segments")
-    os.makedirs(seg_dir, exist_ok=True)
-    files = []
-    src = edit["source"]
-    for i, (a, b, kind, level) in enumerate(segment_plan(edit, cfg)):
-        vf = zoom_filter(kind, b - a, w, h, cfg, level)
-        key = hashlib.md5(json.dumps([src, a, b, vf, w, h, fps, cfg["output"].get("encoder")]).encode()).hexdigest()[:12]
-        out = os.path.join(seg_dir, "%04d_%s.mov" % (i, key))
-        if not os.path.exists(out):
-            fade = min(0.012, (b - a) / 4)
-            run(["ffmpeg", "-v", "error", "-y", "-ss", "%.3f" % a, "-to", "%.3f" % b, "-i", src,
-                 "-vf", "%s,fps=%s,setsar=1,format=yuv420p" % (vf, fps),
-                 "-af", "afade=t=in:d=%.3f,afade=t=out:st=%.3f:d=%.3f,aresample=48000" % (fade, b - a - fade, fade),
-                 "-ac", "2"] + encoder_args(cfg) + ["-c:a", "pcm_s16le", out])
-        files.append(out)
-    # drop stale segments from earlier edits
-    for f in glob.glob(os.path.join(seg_dir, "*.mov")):
-        if f not in files:
-            os.remove(f)
-    lst = os.path.join(jd, "segments.txt")
-    with open(lst, "w") as f:
-        for p in files:
-            f.write("file '%s'\n" % p)
-    body = os.path.join(jd, "body.mov")
-    run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", body])
-    return body
-
-
-# --------------------------------------------- graphics (ASS subtitles: captions, on-screen text, lower thirds)
-
-def ass_color(hexrgb, alpha=0):
-    r, g, b = hexrgb[0:2], hexrgb[2:4], hexrgb[4:6]
-    return "&H%02X%s%s%s" % (alpha, b, g, r)
-
-
-def ass_time(t):
-    t = max(0.0, t)
-    cs = int(round(t * 100))
-    return "%d:%02d:%02d.%02d" % (cs // 360000, cs // 6000 % 60, cs // 100 % 60, cs % 100)
-
-
-def ass_escape(s):
-    return s.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", "\\N")
-
+# --------------------------------------------- captions (uploaded to YouTube as a subtitle file, not burned in)
 
 def no_em_dash(s):
     return s.replace(" — ", " - ").replace("—", " - ").replace("–", "-")
@@ -594,115 +540,6 @@ def write_srt(chunks, path):
             f.write("%d\n%s --> %s\n%s\n\n" % (i, ts(c["s"]), ts(c["e"]), c["text"]))
 
 
-def build_ass(path, edit, words, tl, w, h, cfg, end_start):
-    b = cfg["brand"]
-    s = h / 1080.0
-    cream, char, gold, grey = b["cream"], b["charcoal"], b["gold"], b["grey"]
-    styles = [
-        # name, font, size, primary, outline colour, back colour, bold, border style, outline, shadow, align, marginV
-        ("Caption", "Inter SemiBold", 46, "FFFFFF", char, char, 0, 3, 10, 0, 2, 70, 0x40),
-        ("Callout", "DM Serif Display", 58, char, cream, cream, 0, 3, 22, 0, 7, 0, 0x08),
-        ("CalloutSmall", "Inter SemiBold", 40, char, cream, cream, 0, 3, 18, 0, 7, 0, 0x08),
-        ("LTName", "DM Serif Display", 62, char, cream, cream, 0, 3, 18, 0, 1, 0, 0x00),
-        ("LTSub", "Inter Medium", 34, grey, cream, cream, 0, 3, 14, 0, 1, 0, 0x00),
-        ("Bar", "Inter", 20, gold, gold, gold, 0, 1, 0, 0, 7, 0, 0x00),
-    ]
-    head = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: %d" % w, "PlayResY: %d" % h, "WrapStyle: 0",
-            "ScaledBorderAndShadow: yes", "", "[V4+ Styles]",
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
-            "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"]
-    for name, font, size, prim, outl, back, bold, bs, ol, sh, al, mv, alpha in styles:
-        head.append("Style: %s,%s,%d,%s,%s,%s,%s,%d,0,0,0,100,100,0,0,%d,%d,%d,%d,%d,%d,%d,1" % (
-            name, font, round(size * s), ass_color(prim), ass_color(prim), ass_color(outl, alpha), ass_color(back, alpha),
-            -1 if bold else 0, bs, round(ol * s), sh, al, round(60 * s), round(60 * s), round(mv * s)))
-    ev = ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
-
-    def add(layer, t0, t1, style, text):
-        t1 = min(t1, end_start - 0.05)
-        if t1 - t0 > 0.2:
-            ev.append("Dialogue: %d,%s,%s,%s,,0,0,0,,%s" % (layer, ass_time(t0), ass_time(t1), style, text))
-
-    if cfg["captions"].get("burn", True):
-        for c in caption_chunks(words, tl, cfg):
-            add(0, c["s"], c["e"], "Caption", ass_escape(no_em_dash(c["text"])))
-    x0, y0 = round(90 * s), round(90 * s)
-    gold_tag = "{\\c%s}" % ass_color(gold)
-    for o in edit.get("overlays", []):
-        t0 = tl.out(o["t"])
-        t1 = t0 + o.get("dur", 5)
-        lines = [no_em_dash(x) for x in o["lines"]]
-        first, rest = lines[0], lines[1:]
-        txt = ass_escape(first)
-        for acc in o.get("accent", []):
-            txt = re.sub(r"(?i)\b(%s)\b" % re.escape(acc), lambda m: gold_tag + m.group(1) + "{\\r}", txt, count=1)
-        big = len(first) <= 46 and not rest
-        style = "Callout" if big else "CalloutSmall"
-        body = txt + ("\\N" + "\\N".join(ass_escape(x) for x in rest) if rest else "")
-        add(2, t0, t1, style, "{\\fad(250,250)\\pos(%d,%d)}%s" % (x0 + round(14 * s), y0, body))
-        # honey gold accent bar to the left of the card
-        bar_h = round((70 if big else 56) * s * (1 + len(rest) * 0.95))
-        add(3, t0, t1, "Bar", "{\\fad(250,250)\\pos(%d,%d)\\p1}m 0 0 l %d 0 l %d %d l 0 %d{\\p0}" % (
-            x0 - round(26 * s), y0 - round(22 * s), round(8 * s), round(8 * s), bar_h, bar_h))
-    for lt in edit.get("lower_thirds", []):
-        t0 = tl.out(lt["t"])
-        t1 = t0 + lt.get("dur", 5)
-        name, sub = (b["name"], b["credentials"]) if lt.get("kind") == "name" else (b["company"], b["tagline"])
-        yb = h - round(250 * s)
-        add(2, t0, t1, "LTName", "{\\fad(300,300)\\pos(%d,%d)}%s" % (round(110 * s), yb - round(62 * s), ass_escape(name)))
-        add(2, t0, t1, "LTSub", "{\\fad(300,300)\\pos(%d,%d)}%s" % (round(110 * s), yb + round(10 * s), ass_escape(no_em_dash(sub))))
-        add(3, t0, t1, "Bar", "{\\fad(300,300)\\pos(%d,%d)\\p1}m 0 0 l %d 0 l %d %d l 0 %d{\\p0}" % (
-            round(78 * s), yb - round(150 * s), round(8 * s), round(8 * s), round(172 * s), round(172 * s)))
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(head + ev) + "\n")
-
-
-def font(name, size):
-    from PIL import ImageFont
-    files = {"serif": "DMSerifDisplay_400Regular.ttf", "sans": "Inter_600SemiBold.ttf", "sans_medium": "Inter_500Medium.ttf",
-             "sans_bold": "Inter_700Bold.ttf"}
-    return ImageFont.truetype(os.path.join(FONTS, files[name]), size)
-
-
-def end_card(path, w, h, cfg, next_title=""):
-    """Last 20 s: cream end screen with the logo, sign-off and two empty frames for YouTube's end-screen videos."""
-    from PIL import Image, ImageDraw
-    b = cfg["brand"]
-    im = Image.new("RGB", (w, h), "#" + b["cream"])
-    d = ImageDraw.Draw(im)
-    s = h / 1080.0
-    logo = Image.open(os.path.join(ASSETS, "logo.png")).convert("RGBA")
-    bbox = logo.getchannel("A").point(lambda v: 255 if v > 200 else 0).getbbox()
-    logo = logo.crop(bbox) if bbox else logo
-    lh = int(300 * s)
-    logo = logo.resize((int(logo.width * lh / logo.height), lh))
-    im.paste(logo, ((w - logo.width) // 2, int(90 * s)), logo)
-    f1, f2 = font("serif", int(64 * s)), font("sans_medium", int(30 * s))
-    line1 = "Thanks for watching"
-    d.text(((w - d.textlength(line1, font=f1)) / 2, int(420 * s)), line1, font=f1, fill="#" + b["charcoal"])
-    line2 = no_em_dash(b["signoff"])
-    d.text(((w - d.textlength(line2, font=f2)) / 2, int(510 * s)), line2, font=f2, fill="#" + b["grey"])
-    # two video slots (16:9) and the subscribe circle where YouTube places end-screen elements
-    vw, vh = int(560 * s), int(315 * s)
-    y = int(610 * s)
-    for x in (int(w / 2 - vw - 40 * s), int(w / 2 + 40 * s)):
-        d.rounded_rectangle([x, y, x + vw, y + vh], radius=int(16 * s), outline="#" + b["gold"], width=max(2, int(4 * s)))
-    lbl = font("sans", int(26 * s))
-    for x, t in ((int(w / 2 - vw - 40 * s), "Watch next"), (int(w / 2 + 40 * s), "Start with this one")):
-        d.text((x + (vw - d.textlength(t, font=lbl)) / 2, y + vh + int(14 * s)), t, font=lbl, fill="#" + b["grey"])
-    im.save(path)
-
-
-def end_card_clip(jd, w, h, fps, cfg):
-    png = os.path.join(jd, "end_card.png")
-    end_card(png, w, h, cfg)
-    out = os.path.join(jd, "end_card.mov")
-    secs = cfg["end_screen_seconds"]
-    run(["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", str(fps), "-t", str(secs), "-i", png,
-         "-f", "lavfi", "-t", str(secs), "-i", "anullsrc=r=48000:cl=stereo",
-         "-vf", "fade=t=in:d=0.6,format=yuv420p,setsar=1", "-shortest"] + encoder_args(cfg) + ["-c:a", "pcm_s16le", out])
-    return out
-
-
 def find_broll(jd, edit):
     """B-roll clips: edit.json "file", else broll_NN.* in the work folder or the episode's B-roll folder."""
     dirs = [jd, os.path.join(jd, "B-roll")] + edit.get("broll_dirs", [])
@@ -719,64 +556,63 @@ def find_broll(jd, edit):
     return [b for b in edit.get("broll", []) if b.get("file") and b.get("t") is not None]
 
 
-def render(job, part=None, log=print):
+def broll_pass(body, brolls, tl, voice_end, fps, out, cfg):
+    """Real B-roll clips (if any were dropped in) go full frame over the finished picture, voice continues."""
+    import motion
+    inputs = ["-i", body]
+    graph, last = [], "0:v"
+    for k, b in enumerate(brolls):
+        t0 = tl.out(b["t"])
+        dur = min(b["dur"], max(0.5, voice_end - t0 - 0.2))
+        loop = ["-loop", "1"] if b["file"].lower().endswith((".jpg", ".png")) else ["-stream_loop", "-1"]
+        inputs += loop + ["-t", "%.2f" % dur, "-i", b["file"]]
+        graph.append("[%d:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=%s,format=yuva420p,"
+                     "fade=t=in:d=0.35:alpha=1,fade=t=out:st=%.2f:d=0.35:alpha=1,setpts=PTS-STARTPTS+%.3f/TB[b%d]"
+                     % (k + 1, fps, max(0.1, dur - 0.35), t0, k))
+        graph.append("[%s][b%d]overlay=eof_action=pass:enable='between(t,%.3f,%.3f)'[v%d]" % (last, k, t0, t0 + dur, k))
+        last = "v%d" % k
+    run(["ffmpeg", "-v", "error", "-y"] + inputs + ["-filter_complex", ";".join(graph), "-map", "[%s]" % last, "-map", "0:a",
+                                                    "-pix_fmt", "yuv420p"] + motion.encoder(cfg) +
+        ["-c:a", "copy", "-movflags", "+faststart", out])
+
+
+def render(job, part=None, log=print, stills=None):
+    """edit.json (or draft.json) -> final.mp4 in the published EP.11 v3 look (see motion.py).
+    part=(from, to) in output seconds renders a piece to sample.mp4; stills=[source seconds] writes stills/*.jpg."""
+    import motion
     cfg = load_config()
     jd = os.path.join(WORK, job)
     edit = read_json(os.path.join(jd, "edit.json")) or read_json(os.path.join(jd, "draft.json"))
-    info = edit["info"]
-    fps = cfg["output"].get("fps") or info["fps"]
-    w, h = out_size(info, cfg)
     words = apply_fixes(read_json(os.path.join(jd, "words.json")), cfg.get("fixes", []) + edit.get("fixes", []))
-    tl = Timeline(edit["keep"])
-    log("render %s: %d cuts, %.1f s + %d s end screen at %dx%d" % (job, len(edit["keep"]), tl.duration, cfg["end_screen_seconds"], w, h))
-    body = cut_segments(jd, edit, cfg, w, h, fps)
-    endc = end_card_clip(jd, w, h, fps, cfg)
-    end_start = tl.duration
-    ass = os.path.join(jd, "graphics.ass")
-    build_ass(ass, edit, words, tl, w, h, cfg, end_start)
-    brolls = find_broll(jd, edit)
-    inputs = ["-i", body, "-i", endc]
-    graph = ["[0:v]setpts=PTS-STARTPTS[v0]"]
-    last = "v0"
-    for k, b in enumerate(brolls):
-        t0 = tl.out(b["t"])
-        dur = min(b["dur"], max(0.5, end_start - t0 - 0.2))
-        if b["file"].lower().endswith((".jpg", ".png")):
-            inputs += ["-loop", "1", "-t", "%.2f" % dur, "-i", b["file"]]
-        else:
-            inputs += ["-stream_loop", "-1", "-t", "%.2f" % dur, "-i", b["file"]]
-        idx = 2 + k
-        graph.append("[%d:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,fps=%s,format=yuv420p,"
-                     "fade=t=in:d=0.35:alpha=1,fade=t=out:st=%.2f:d=0.35:alpha=1,setpts=PTS-STARTPTS+%.3f/TB[b%d]"
-                     % (idx, w, h, w, h, fps, max(0.1, dur - 0.35), t0, k))
-        graph.append("[%s][b%d]overlay=eof_action=pass:enable='between(t,%.3f,%.3f)'[v%d]" % (last, k, t0, t0 + dur, k + 1))
-        last = "v%d" % (k + 1)
-    fonts_dir = FONTS.replace(":", "\\:").replace("'", "\\'")
-    graph.append("[%s]fade=t=out:st=%.3f:d=0.4[vb]" % (last, max(0, end_start - 0.4)))
-    graph.append("[vb][0:a][1:v][1:a]concat=n=2:v=1:a=1[vc][ac]")
-    graph.append("[vc]ass='%s':fontsdir='%s',format=yuv420p[vout]" % (ass.replace("'", "\\'"), fonts_dir))
-    a = cfg["audio"]
-    chain = ["highpass=f=%d" % a["highpass"]]
-    if a.get("denoise"):
-        chain.append("afftdn=nr=%d:nf=-40" % a.get("denoise_db", 10))
-    chain += ["acompressor=threshold=-20dB:ratio=2.5:attack=8:release=150",
-              "loudnorm=I=%d:TP=-1.5:LRA=9" % a["lufs"], "aresample=48000"]
-    graph.append("[ac]%s[aout]" % ",".join(chain))
+    if stills is not None:
+        sd = os.path.join(jd, "stills")
+        shutil.rmtree(sd, ignore_errors=True)
+        os.makedirs(sd)
+        tl0 = Timeline(edit["keep"])
+        outs = [tl0.out(s) if s <= edit["keep"][-1][1] else tl0.duration + (s - edit["keep"][-1][1]) for s in stills]
+        motion.render_video(edit, words, Timeline, cfg, sd, stills=outs, log=log)
+        log("stills in", sd)
+        return sd
     out = os.path.join(jd, "final.mp4" if part is None else "sample.mp4")
-    trim = []
-    if part:
-        trim = ["-ss", "%.2f" % part[0], "-to", "%.2f" % part[1]]
-    run(["ffmpeg", "-v", "error", "-y"] + inputs + ["-filter_complex", ";".join(graph), "-map", "[vout]", "-map", "[aout]"]
-        + trim + ["-r", str(fps)] + encoder_args(cfg, final=True) + ["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k",
-                                                                    "-movflags", "+faststart", out])
+    brolls = find_broll(jd, edit)
+    target = out + ".body.mp4" if brolls else out
+    log("render %s: %d cuts, %d graphics, %d B-roll clips" % (job, len(edit["keep"]), len(edit.get("graphics", [])), len(brolls)))
+    clips, voice_end, show, tl = motion.render_video(edit, words, Timeline, cfg, target, part=part, log=log)
+    if brolls:
+        fps = int(round(cfg["output"].get("fps") or edit["info"]["fps"]))
+        broll_pass(target, brolls, tl, voice_end, fps, out, cfg)
+        os.remove(target)
+    if show.A.misses:
+        log("graphics not placed: " + "; ".join(show.A.misses))
     if part is None:
         write_srt(caption_chunks(words, tl, cfg), os.path.join(jd, "captions.srt"))
         post = read_json(os.path.join(jd, "post.json"), {}) or {}
         thumb = post.get("thumbnail") or {}
         thumbnail(edit["source"], thumb.get("t", edit["keep"][0][0] + 3), thumb.get("text") or [], thumb.get("accent", ""),
                   os.path.join(jd, "thumbnail.jpg"), cfg)
-        write_json(os.path.join(jd, "render.json"), {"duration": end_start + cfg["end_screen_seconds"], "body": end_start,
-                                                     "broll_used": [b["n"] for b in brolls], "size": [w, h]})
+        write_json(os.path.join(jd, "render.json"), {"duration": voice_end + cfg["end_screen_seconds"], "body": voice_end,
+                                                     "broll_used": [b["n"] for b in brolls], "size": [1920, 1080],
+                                                     "graphics_not_placed": show.A.misses})
     log("rendered", out)
     return out
 
@@ -804,12 +640,13 @@ def thumbnail(source, t, text_lines, accent, path, cfg):
     d = ImageDraw.Draw(im)
     lines = [no_em_dash(x) for x in (text_lines or ["Watch", "this"])][:3]
     size = 132 if max(len(x) for x in lines) <= 8 else 104 if max(len(x) for x in lines) <= 11 else 84
-    f = font("serif", size)
+    import gfx
+    f = gfx.font("serif", size, 620)
     y = (H - len(lines) * size * 1.08) / 2 - 10
     for ln in lines:
         x = 70
         for word in ln.split(" "):
-            col = "#" + (b["gold"] if accent and norm(word) in [norm(a) for a in accent.split()] else b["charcoal"])
+            col = "#" + (b["gold"] if accent and norm(word) in [norm(a) for a in accent.split()] else b["navy"])
             d.text((x, y), word, font=f, fill=col)
             x += d.textlength(word + " ", font=f)
         y += size * 1.08
@@ -844,5 +681,7 @@ if __name__ == "__main__":
         render(a[1])
     elif a[:1] == ["sample"] and len(a) == 4:
         render(a[1], part=(float(a[2]), float(a[3])))
+    elif a[:1] == ["stills"] and len(a) == 3:
+        render(a[1], stills=[float(x) for x in a[2].split(",") if x])
     else:
         print(__doc__)

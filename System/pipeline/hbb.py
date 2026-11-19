@@ -140,7 +140,7 @@ def run_editor(job, notes=None, error=None, timeout=60 * 60, turns=150):
     env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + env.get("PATH", "/usr/bin:/bin")
     cmd = [binary, "-p", "\n".join(msg), "--permission-mode", "acceptEdits", "--max-turns", str(turns),
            "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(mkdir:*)",
-           "Bash(cp:*)"]
+           "Bash(cp:*)", "Bash(System/pipeline/stills:*)"]
     if acfg().get("claude_model"):
         cmd += ["--model", acfg()["claude_model"]]
     log("editor:", job, "(change request)" if notes else "")
@@ -171,10 +171,18 @@ def validate(job):
     text = json.dumps(post, ensure_ascii=False)
     if "—" in text:
         return "post.json contains an em dash; use standard hyphens"
-    for o in edit.get("overlays", []):
-        if not o.get("lines"):
-            return "an overlay has no lines"
+    if "\u2014" in json.dumps(edit.get("graphics", []), ensure_ascii=False):
+        return "a graphic contains an em dash; use standard hyphens"
+    for g in edit.get("graphics", []):
+        if g.get("type") not in KNOWN_GRAPHICS:
+            return "unknown graphic type %r (see EDITOR.md)" % g.get("type")
+        if g.get("at") in (None, ""):
+            return "a %s graphic has no 'at'" % g.get("type")
     return None
+
+
+KNOWN_GRAPHICS = ("title", "name", "lower", "related", "next", "warning", "statement", "chapter", "linkedin", "brand",
+                  "subscribe", "list", "card", "quote", "compare", "cards")
 
 
 def fallback_post(job):

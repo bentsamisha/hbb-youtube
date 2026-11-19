@@ -17,7 +17,7 @@ Read first, every time:
 - `script.md` / `script.json`: the episode script. `script.json` has `rows` = the production table (spoken text + details).
 - `draft.json`: the automatic edit. For every script row: the take the matcher picked (`start`, `end`, `score`,
   `takes` = how many attempts it found). `keep` = the ranges that stay, pauses already tightened, obvious repeats removed.
-  `overlays` (on-screen text), `lower_thirds`, `broll`, `cards`, `zoom` are placed from the script's Details column.
+  `graphics` (a first mechanical pass), `broll`, `cards`, `zoom` are placed from the script's Details column.
 - `words.json` exists but is huge: only grep it when you need the exact time of one word.
 - The raw video is `draft["source"]`. Look at a frame when needed:
   `ffmpeg -v error -ss <sec> -i <source> -frames:v 1 -vf scale=960:-2 <job>/frames/f_<sec>.jpg`, then Read the jpg.
@@ -34,12 +34,54 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
 - `keep`: `[start, end]` in SOURCE seconds, in time order, not overlapping. Never cut inside a word; start a range
   ~0.1 s before the first word and end it ~0.2 s after the last. A natural breath of 0.2-0.35 s between sentences stays.
 - The finished talk should be close to the script length (Standard 5-7 min, quick hits 3-5 min). Don't speed anything up.
-- `overlays`: on-screen text cards `{"t": src_sec, "dur": sec, "lines": [...], "accent": ["word in honey gold"]}`.
-  Keep the script's wording, max ~45 characters per line, 1-5 lines. Move `t` to the moment he says the matching words.
-  For a Details note without quoted text (e.g. "three badges stack up"), write the card text yourself, short.
-- `lower_thirds`: `{"t", "dur": 5, "kind": "name"|"company"}`. The name card goes on his intro line.
-- `broll`: one per B-roll cue: `{"n", "t", "dur", "prompt"}`. Put `t` on the sentence it illustrates. The clip itself
-  comes later (Mykhailo generates it); you only place it.
+- `graphics`: the motion-graphics layer, in the look of the published EP.11 v3 (navy cards with a gold edge, Fraunces
+  serif + Outfit sans, honeycomb hexes, cream panels). REWRITE the draft's list: it is only a starting point. Each item
+  is `{"type", "at", "until", ...}`. `at`/`until` (and every item's `at`) are either a SOURCE second or, better, a short
+  phrase of 2-5 words he actually says in the kept take (copy it from the transcript; e.g. `"clause 4.1"`). A phrase
+  lands the graphic on the word even if the cut changes. `{"at": "phrase", "end": true, "plus": 0.4}` = 0.4 s after the
+  phrase ends. Text: the script's wording, sentence case, hyphens never em dashes, `·` as a separator is fine.
+  Lower-third family (he stays full screen, card bottom-left):
+  - `title`: the hook question, `{"kicker": "ISO 42001 · AI management systems", "title": "Do you actually need ISO 42001?"}`
+  - `name`: on his intro line, no fields needed (name, role line and company come from config).
+  - `lower`: a key line, `{"title", "sub"?, "kicker"?, "accent": ["words in gold"]}`. Keep the title under ~60 characters.
+  - `chapter`: at "Group number one...", `{"num": 1, "of": 3, "title": "What the standard actually says"}`. Draws the
+    sting and the 1-2-3 hex tracker in the top corner until the CTA.
+  - `statement`: a slam line centred low, `{"lines": [{"text": "Not which one.", "at": ...},
+    {"text": "Which ones - for which system.", "accent": ["for which system"], "at": ...}]}`
+  - `warning`: `{"kicker": "One warning", "title": "Before any contract conversation"}` (3 s).
+  - `related` / `next`: `{"title": "Consultant or DIY?"}` when he mentions another video / teases the next one.
+  - `linkedin` (at "DM me on LinkedIn"), `subscribe` (at "like and subscribe"; a cursor clicks the button), `brand`
+    (the HoneyBadger & Bees card during the sign-off).
+  Split screen (he slides right, a cream panel opens on the left, about 8-25 s; one at a time):
+  - `list`: `{"kicker", "title", "style": "number"|"check"|"icon"|"dot"|"verdict", "items": [{"text", "at", "sub"?,
+    "icon"?, "verdict"?, "tone": "gold"|"grey", "dim_at"?, "dim_note"?}], "note"?, "tag"?, "stamp"?}`.
+    number = agenda; check = gold ticks (checklists); icon = navy hex with an icon (roles); verdict = a row, an arrow and
+    a pill ("Platform provider" -> "Yes - and soon"); dim_at greys an item out when he says it doesn't count.
+    Max 6 items, each under ~32 characters. `note` = a serif line with a gold edge, `tag` = a gold pill, `stamp` = a red
+    stamp ("Declared: none"); each is a string or `{"text", "at"}`.
+  - `card`: a definition, `{"icon", "kicker": "ISO/IEC 22989 · 5.19.2", "title": "AI Provider", "body": "Provides
+    products or services that use AI.", "underline": "develops", "items": [...], "note"?, "tag"?}`.
+  Full screen explainers (cream paper with a faint honeycomb, his voice continues; 8-20 s). Use these INSTEAD of AI
+  B-roll: for every B-roll cue in the script, build the explainer that teaches that moment best and leave that
+  `broll` entry's `t` as null (Mykhailo only drops in real clips when he wants them):
+  - `quote`: a clause typing out on a sheet, `{"kicker", "source": "ISO/IEC 42001 · Clause 4.1", "heading", "text":
+    "...shall determine its roles...", "highlight": "shall determine its roles", "highlight_at": phrase, "caption":
+    {"text": "It doesn't hand you a role. You determine one.", "accent": "You determine one.", "at": phrase},
+    "paraphrased": true}`. Keep `text` under ~220 characters.
+  - `compare`: two columns, `{"kicker", "title"?, "left": {"head": "ISO/IEC 22989", "items": ["Provider", {"text":
+    "Producer", "hl": phrase}]}, "right": {"head": "EU AI Act", "at": phrase, "items": [..., {"text": "no producer",
+    "empty": true}]}, "caption": {"text", "accent"}}`. Max 6 items a column.
+  - `cards`: a headline and up to 4 source cards, `{"kicker", "title": "Not boxes you pick one from", "icons":
+    ["producer", "provider", "customer"], "items": [{"label": "ISO/IEC 42001 · 4.1", "text": "...one or more of the
+    following", "at": phrase}]}`. `icons` (optional, up to 3) draws overlapping hexes on the left.
+  Icons: provider, producer, customer, partner, subject, authority, doc, shield, lock, clock, people, money, check,
+  cross, warn. Split and full scenes never overlap (the renderer ends one before the next). Aim for one graphic moment
+  every 15-30 s, a split or full scene in every section, and nothing on screen during his strongest lines to camera.
+  Check your work: `System/pipeline/stills "<job>" 12.5,40,95` renders those SOURCE seconds to
+  `System/work/<job>/stills/` (seconds, no video); Read 3-6 of them and fix overlaps or text that runs off a panel.
+- `broll`: one per B-roll cue: `{"n", "t", "dur", "prompt"}`. By default an explainer graphic replaces it (`t`: null).
+  Only when the notes say he will film or generate a real clip, put `t` on the sentence it illustrates; a dropped-in
+  file `broll_NN.mp4` then plays full frame over the picture.
 - `cards`: `{"t", "what"}` YouTube card moments (he adds cards in Studio; the pipeline lists the times for him).
 - `zoom`: `{"t0", "t1", "kind": "slow_in"|"slow_out"|"in"}` from the camera notes.
 - `fixes`: `[["heard", "correct"], ...]` for misheard words in the captions (ISO numbers, names: "Mykhailo Bentsa",
@@ -81,4 +123,4 @@ nothing else. If a note is a lasting rule ("never put captions over B-roll"), al
 `System/pipeline/EDITOR_NOTES.md` with today's date.
 
 When done, reply with one short paragraph: final talk length, which rows had retakes and which take you used,
-anything skipped or unsure. Do not render. Do not touch other folders.
+anything skipped or unsure. Do not render the video (stills are fine). Do not touch other folders.

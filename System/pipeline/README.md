@@ -7,11 +7,14 @@ Trust No Pack pipeline (`~/TNP/System/pipeline`), rebuilt for long landscape tal
 - `hbb.py`: the autopilot (inbox watcher, Claude editor, review folders, change requests, approval, scheduling,
   YouTube upload, notifications). `hbb.py` without arguments lists the commands.
 - `editor.py`: the editing engine. `analyze` (Whisper transcript, silence map, script matching, automatic edit),
-  `render` (cuts, zooms, captions, on-screen text, lower thirds, B-roll, end screen, audio chain, thumbnail, subtitles).
+  `render` (cut, audio chain, subtitles, thumbnail; the picture comes from `motion.py`). `stills` renders single frames.
+- `motion.py` + `gfx.py`: the EP.11 v3 look. Camera (punch-ins, split-screen slide), every graphic template
+  (title, name, lower, chapter + tracker, statement, list, card, quote, compare, cards, LinkedIn, subscribe, brand)
+  and the end card, composited frame by frame and piped to ffmpeg. Graphics are listed in edit.json `graphics`.
 - `scripts.py`: parses the Video_N_Script docs (prompter text + production table cues) and exports them from Drive.
 - `publish.py`: YouTube Data API upload (schedule, thumbnail, captions, playlist) and Drive read access.
 - `EDITOR.md`: what the headless Claude editor does. `EDITOR_NOTES.md`: lasting feedback.
-- `config.json`: look, cut, audio, brand, schedule. `assets/`: logo and fonts (DM Serif Display, Inter; SIL OFL).
+- `config.json`: look, cut, audio, brand, schedule. `assets/`: logos and fonts (Fraunces and Outfit for the video, DM Serif Display and Inter kept for reference; SIL OFL).
 
 ## Manual use
     .venv/bin/python editor.py analyze "<video or folder>" --episode 12   # -> System/work/<job>/draft.json

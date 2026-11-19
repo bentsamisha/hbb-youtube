@@ -14,9 +14,9 @@
 4. Open **`HBB/2 Review/EP.12 <name>/`**:
    - watch `EP.12 <name>.mp4` and look at `cover.jpg`
    - read `YOUTUBE.txt` (title options, description, tags, pinned comment, card times)
-   - `B-ROLL.txt` lists the B-roll shots with their AI prompts. Generate them (Veo / Gemini, the B-roll generator HTML,
-     or a stock clip), save as `broll_01.mp4`, `broll_02.mp4` ... into the episode's `B-roll` folder.
-     The video is rendered again by itself ("Updated" notification).
+   - B-roll: the script's B-roll moments are already covered by animated explainers (like EP.11 v3). If you still want
+     a real clip somewhere, save it as `broll_01.mp4` ... in the episode's `B-roll` folder and say where in
+     `CHANGES.txt`; the video is rendered again by itself ("Updated" notification).
    - **Want changes?** Create `CHANGES.txt` in the episode folder and write in plain words what to change
      ("use the first take of the intro", "the on-screen text at 02:10 should say ...", "title option 2").
      Claude redoes it. If it's a lasting rule, say so; it goes into `System/pipeline/EDITOR_NOTES.md` for every future video.
@@ -29,20 +29,23 @@
 ## What the edit does
 - **Retakes and pauses**: every paragraph of the production table is matched to the transcript; the last complete
   take wins, repeated phrases inside a take are cut, pauses longer than about half a second are tightened.
-- **Camera feel**: the script's "slow zoom in / gentle zoom out" become slow zooms; after bigger cuts the frame
-  switches between normal and a 12 % punch-in, so jump cuts look deliberate.
-- **Captions**: burned in (Inter, white on charcoal), plus a clean `.srt` uploaded as YouTube subtitles.
-- **On-screen text**: every quoted ON-SCREEN text from the Details column, on a cream card with a honey-gold bar.
-- **Name card** on your intro line, company card on the CTA line.
-- **B-roll** where the script says B-roll, once you drop the clips in.
-- **End screen**: 20 s cream card with the logo and two video frames for YouTube's end-screen elements.
+- **The look is the published EP.11 v3**: navy cards with a gold edge, Fraunces + Outfit type, honeycomb hexes.
+  Claude places the graphics from the script's Details column, timed to the words you say:
+  hook title and name card, key lines, chapter stings with a 1-2-3 hex tracker, split screens (you slide right, a
+  cream panel opens on the left) for agendas, lists, checklists and definitions, full-screen explainers instead of
+  AI B-roll (clause on a paper sheet with a highlighter, two-column comparisons, citation cards), the LinkedIn card,
+  the subscribe click and the brand card at the sign-off.
+- **Camera feel**: slow zoom in at the opening, a 1.2x punch-in that alternates at bigger cuts, a very slow push,
+  a gentle zoom out at the sign-off.
+- **Captions**: a clean `.srt` from the transcript, uploaded as YouTube subtitles (not burned in, like v3).
+- **End screen**: 12 s cream honeycomb card with the logo, the tagline and two frames for YouTube's end-screen videos.
+- **Output**: 1080p 25 fps (the graphics are drawn at 1080p, like v3).
 - **Sound**: rumble filter, light denoise (the LG air conditioner), gentle compression, loudness -14 LUFS for YouTube.
 
 ## Settings (`System/pipeline/config.json`)
 - `autopilot.post_times`: e.g. `{"mon": ["09:00"], "thu": ["17:00"]}` for two slots a week.
-- `output.height`: 2160 (4K) or 1080 (faster render).
-- `captions.burn`: `false` to only upload subtitles.
 - `look.face_x` / `face_y`: where your face sits in the frame (0..1), used for punch-ins and the thumbnail.
+- `brand`: name, role line, tagline and colours used on the cards.
 - `fixes`: words Whisper mishears, `[heard, correct]`.
 
 ## Check the queue

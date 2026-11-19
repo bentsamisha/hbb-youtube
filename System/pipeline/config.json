@@ -83,18 +83,17 @@
   "min_take_score": 0.6
  },
  "look": {
-  "face_x": 0.6,
-  "face_y": 0.38,
-  "zoom_punch": 1.12,
-  "slow_zoom": 0.06,
+  "face_x": 0.62,
+  "face_y": 0.4,
+  "zoom_punch": 1.2,
+  "slow_zoom": 0.08,
   "punch_after_gap": 2.0
  },
  "output": {
-  "height": 2160,
   "fps": 0,
   "encoder": "auto",
-  "bitrate": "45M",
-  "crf": 18,
+  "bitrate": "16M",
+  "crf": 16,
   "preset": "medium"
  },
  "audio": {
@@ -104,23 +103,26 @@
   "denoise_db": 10
  },
  "captions": {
-  "burn": true,
+  "burn": false,
   "max_words": 7,
   "max_chars": 42
  },
- "end_screen_seconds": 20,
+ "end_screen_seconds": 12,
  "brand": {
   "name": "Mykhailo Bentsa",
-  "credentials": "Lead Auditor - ISO 27001 & ISO 42001",
-  "company": "HoneyBadger and Bees Technologies",
+  "company": "HoneyBadger & Bees",
   "tagline": "Enterprise compliance, without the enterprise headache",
   "signoff": "Done with warmth - done properly",
-  "charcoal": "1A1815",
-  "cream": "F5EFE0",
-  "gold": "E5A019",
-  "grey": "6B6357",
+  "cream": "F5F0E8",
+  "gold": "E8A317",
+  "grey": "8B95A5",
   "website": "https://www.honeybadgerandbees.com/",
-  "linkedin": "https://www.linkedin.com/in/michael-bentsa/"
+  "linkedin": "https://www.linkedin.com/in/michael-bentsa/",
+  "role_line": "Lead Auditor · ISO 27001 & ISO 42001",
+  "tagline_a": "Enterprise compliance, ",
+  "tagline_b": "without the enterprise headache.",
+  "site": "honeybadgerandbees.com",
+  "navy": "0A192F"
  },
  "autopilot": {
   "timezone": "Europe/Lisbon",
