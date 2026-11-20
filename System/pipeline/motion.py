@@ -48,6 +48,17 @@ def no_em(s):
 
 # ---------------------------------------------------------------- anchors: phrase or source second -> output second
 
+
+def pill(frame, spr, x, y, h, col, a, padx=28, radius=None):
+    """Rounded pill with the text sprite centred by its real ink (text sprites carry extra padding on the right),
+    so the space before and after the text is the same. (x, y) is the pill's top-left. Returns the pill width."""
+    cols = np.where(spr[..., 3].max(0) > 40)[0]
+    i0, i1 = (int(cols[0]), int(cols[-1]) + 1) if len(cols) else (0, spr.shape[1])
+    pw = (i1 - i0) + 2 * padx
+    blend(frame, rrect(pw, h, h // 2 if radius is None else radius, col), x, y, a)
+    blend(frame, spr, x + padx - i0, y + (h - spr.shape[0]) / 2, a)
+    return pw
+
 class Anchors:
     def __init__(self, words, tl):
         self.tl = tl
@@ -441,11 +452,9 @@ class Show:
                 y += ns.shape[0] + 18
             elif key == "tag":
                 tg = text(no_em(x["text"]), "sans", 30, 600, NAVY, max_w=PW - 2 * MX - 40, align="center")
-                inner = int((tg.shape[1] - 16) / 1.06)  # real ink width: text() pads its sprite on the right
                 al, dy = pop(t, tin)
-                pw, ph = inner + 56, tg.shape[0] + 16
-                blend(frame, rrect(pw, ph, 26, GOLD), MX, y + dy, al * sc.fade(t))
-                blend(frame, tg, MX + pw / 2, y + ph / 2 + dy, al * sc.fade(t), anchor="c")
+                ph = tg.shape[0] + 16
+                pill(frame, tg, MX, y + dy, ph, GOLD, al * sc.fade(t), radius=26)
                 y += tg.shape[0] + 40
             else:
                 p = ease_out(ramp(t, tin, 0.4))
@@ -502,11 +511,11 @@ class Show:
                     gold = it.get("tone", "gold") != "grey"
                     blend(frame, arrow(46, NAVY, 4, 12), tx + 2, y + 66 + dy, a * pv)
                     vs = text(no_em(it["verdict"]), "sans", 34, 600, NAVY if gold else CREAM)
-                    blend(frame, rrect(vs.shape[1] + 40, 60, 30, GOLD if gold else GREY), tx + 68, y + 50 + dy, a * pv)
-                    blend(frame, vs, tx + 88, y + 54 + dy, a * pv)
+                    pill(frame, vs, tx + 68, y + 50 + dy, 60, GOLD if gold else GREY, a * pv, padx=24)
                 if dk and it.get("dim_note"):
                     put(frame, text(no_em(it["dim_note"]), "sans", 24, 500, GREY), tx + 2, y + 48, t, dims[i] + 0.2, sc)
-            self.extras(frame, t, sc, y0 + n * step + 10, g, t0)
+            last_h = {"verdict": 150, "number": 110}.get(style, 120 if has_sub else 90)
+            self.extras(frame, t, sc, y0 + (n - 1) * step + last_h + 40, g, t0)
         Scene(self, "S", t0, t1, draw)
 
     def g_card(self, g, t0, t1):
@@ -601,8 +610,7 @@ class Show:
             if cap:
                 al, dy = pop(t, t_cap)
                 ps = pill_runs(cap["text"], cap.get("accent", ""), CREAM, GOLD)
-                blend(frame, rrect(ps.shape[1] + 60, 92, 46, NAVY), 220, 800 + dy, al * sc.fade(t))
-                blend(frame, ps, 250, 816 + dy, al * sc.fade(t))
+                pill(frame, ps, 220, 800 + dy, 92, NAVY, al * sc.fade(t), padx=30)
         Scene(self, "F", t0 - 0.3, t1, draw)
 
     def g_compare(self, g, t0, t1):

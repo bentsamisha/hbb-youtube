@@ -21,3 +21,9 @@ The Claude editor reads this before every edit and appends a dated line when a c
 - 2026-11-19 (Ep 12 review): every video gets the channel's own generated music (assets/music, mixed automatically):
   a calm bed under the talk and a track that builds during the next-video tease and lands on the end card. Nothing to
   do in edit.json; just keep the tease as the last spoken part before the end card.
+- 2026-11-20 (Ep 13 review): **Text inside every yellow (or navy) pill is centred, with the same space before and after
+  the words.** motion.py draws all pills through `pill()`, which centres by the real ink. A `tag` under a list sits
+  right under the last item; never let a pill float alone at the bottom of a panel.
+- 2026-11-20 (Ep 13 review): when he repeats a phrase ("in July ... in July") or restarts a sentence, keep only the
+  last complete version; never leave both. Drop throwaway fragments between two lines (e.g. a half-started aside
+  before "I'm not a lawyer") so one line runs straight into the next.
