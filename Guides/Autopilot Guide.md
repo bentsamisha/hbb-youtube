@@ -27,8 +27,8 @@
    from the to-do list in `System/studio_queue.json`; see `Studio Links.md`. When the next episode goes live, the
    previous one's "next video" card and end screen are pointed at it.
 7. LinkedIn: about 10 minutes after it's live, Claude posts the launch post from `LINKEDIN.txt` (after your yes in the
-   chat the evening before) and puts the YouTube link in the first comment; see `LinkedIn Posting.md`.
-8. After it's live: pin the comment from `YOUTUBE.txt`.
+   chat only if not approved with the episode) and puts the YouTube link in the first comment; see `LinkedIn Posting.md`.
+8. After it's live: Claude posts the pinned comment from `YOUTUBE.txt` under the video and pins it (Monday run).
 
 ## What the edit does
 - **Retakes and pauses**: every paragraph of the production table is matched to the transcript; the last complete

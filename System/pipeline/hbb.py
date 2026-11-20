@@ -621,7 +621,10 @@ def linkedin_after_upload(folder, job, slot):
               "text": linkedin_text(folder), "first_comment": first_comment(yt.get("url")), "pin_comment": True,
               "image": linkedin_image(folder, job),
               "image_url": "https://i.ytimg.com/vi/%s/maxresdefault.jpg" % yt.get("id") if yt.get("id") else "",
-              "status": "needs_ok", "added": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+              # moving the episode to "3 Approved" approves its LINKEDIN.txt too (autopilot.linkedin_approve_with_episode)
+              "status": "approved" if acfg().get("linkedin_approve_with_episode", True) else "needs_ok",
+              "approved_at": datetime.now(timezone.utc).isoformat(timespec="seconds") if acfg().get("linkedin_approve_with_episode", True) else None,
+              "added": datetime.now(timezone.utc).isoformat(timespec="seconds")})
     write_json(linkedin_queue_path(), q)
 
 

@@ -14,8 +14,11 @@ actually says, "New video goes through ...", then "🦡 N minutes. No upselling.
 - Edit the POST section in `LINKEDIN.txt` to change the wording; your edit is kept through re-edits and the upload.
 
 **How it gets posted**
-1. When the video uploads, the post joins `System/linkedin_queue.json` (status `needs_ok`, time = live + 10 min).
-2. The evening before (Sunday ~19:40), Claude shows the exact post in the chat and asks for a yes. Nothing is posted
+1. Approving the episode (moving it to "3 Approved") approves its LINKEDIN.txt POST, first comment and image
+   (THUMBNAIL.jpg) as they are in the folder. On upload the post joins `System/linkedin_queue.json` as `approved`,
+   time = live + 10 min. Edit LINKEDIN.txt before you approve if you want other wording.
+   (Set `autopilot.linkedin_approve_with_episode` to false to get a separate yes in the chat instead.)
+2. Only posts still `needs_ok` get a question in the chat on Sunday evening. Nothing is posted
    without that yes for that specific post.
 3. Publish day ~09:12: if the video is public, Claude posts it on linkedin.com through Claude in Chrome on the Mac,
    with the episode thumbnail attached as the image, then adds the first comment (🎬 YouTube link, 🐝 website),
