@@ -57,7 +57,7 @@
 - **Sound**: rumble filter, light denoise (the LG air conditioner), gentle compression, loudness -14 LUFS for YouTube.
 
 ## Settings (`System/pipeline/config.json`)
-- `autopilot.first_slot_date`: no video goes live before this day (set to 2026-11-30 so Ep 12 is the first). Clear it once it has passed.
+- `autopilot.first_slot_date`: no video goes live before this day (set to 2026-11-23 so Ep 12 is the first). Clear it once it has passed.
 - `autopilot.review_deadline`: reminder / auto-approve times (`"thu 18:00"`, `"fri 18:00"`); `"on": false` turns it off.
 - `autopilot.card_import`: SD card import; `since` (only clips recorded after it), `min_seconds` (shorter test clips are ignored).
 - `autopilot.post_times`: e.g. `{"mon": ["09:00"], "thu": ["17:00"]}` for two slots a week.
