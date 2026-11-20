@@ -32,3 +32,6 @@ The YouTube API can't add cards or end-screen elements, so this step happens in 
    Link cards (to the website) are disabled on this channel until it joins the YouTube Partner Program: skip them.
    In Chrome, work in the tab that is in front: a background tab can't be screenshotted.
 4. Check the preview once, then set the to-do's status to "done" and write a one-line `result`.
+
+**Shorts**: a to-do with `related_video` is a Short. In Studio open that Short > Details > "Related video" and pick the
+full episode (`related_video` link), save. It makes the "full episode" link show under the Short.

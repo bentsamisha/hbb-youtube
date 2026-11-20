@@ -90,6 +90,24 @@ Keep every field of draft.json (source, info, rows, ...); change only what needs
 - `fixes`: `[["heard", "correct"], ...]` for misheard words in the captions (ISO numbers, names: "Mykhailo Bentsa",
   "HoneyBadger and Bees", "ISO/IEC 22989", "SaaS"). The captions use the transcript words, so this matters.
 
+- `shorts`: 2 vertical Shorts when the talk is under about 7 minutes, 3 when it is longer. Each Short is one idea
+  that works on its own, 30-58 seconds (never over 58), cut from the kept takes:
+  ```json
+  {"n": 1, "title": "Fine-tuning made you an AI producer", "kicker": "ISO 42001",
+   "ranges": [[31.2, 51.84], [143.9, 171.15], [174.85, 182.3]],
+   "fixes": [["product for service", "product or service"], ["fine-tuning one", "Fine-tuning one"]],
+   "pops": [{"at": "producer activity", "until": "for that system", "text": "Fine-tuning = producer activity", "accent": ["producer"]}],
+   "description": "One or two plain sentences: the problem and the takeaway.",
+   "hashtags": ["#ISO42001", "#AIGovernance", "#Shorts"]}
+  ```
+  `ranges` are SOURCE seconds in play order, cut on word edges (start 0.1 s before the first word, end 0.1 s after
+  the last), only from kept takes, never across a retake or a look-down. The first seconds must be a hook that makes
+  sense without the episode (a problem or a surprising claim), the last line a clear takeaway; drop "group number
+  two", "in this video", "link below" and the like. `title` 3-7 words, plain, no emoji. `pops` are 2-4 short key-line
+  cards (max 7 words, `accent` = 1-2 words in gold) timed to the phrase he says (`at`/`until` are phrases or source
+  seconds). The captions are burned in, so add `fixes` for every misheard word in the Short and capitalise sentence
+  starts. Pick the strongest moments: a definition people get wrong, a fix, a number, a myth.
+
 ## 2. `post.json`: the YouTube text (brand rules are strict)
 ```json
 {"episode_name": "3-5 words, Title Case, names the folder, e.g. 'Do You Need ISO 42001'",

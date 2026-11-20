@@ -7,13 +7,19 @@
 ## Weekly use (about 15 minutes of your time after recording)
 1. Record the episode from the prompter. Retakes are fine: just say the sentence or paragraph again,
    the pipeline keeps the **last complete take** of every script paragraph.
-2. Copy the clips from the SD card (`PRIVATE/M4ROOT/CLIP/C0001.MP4` ...) into a new folder in **`HBB/1 Inbox`**
-   named after the episode, e.g. `EP12` (one file is fine too: `EP12.MP4`).
+2. Put the SD card in the Mac. New clips (recorded after 20 Nov 2026, longer than a minute) are copied into
+   **`HBB/1 Inbox`** by themselves and you get "Card imported": eject the card then. No renaming needed: the
+   pipeline recognises the episode from what you say against the scripts. Record **one clip per episode**.
+   The card is never changed; `System/imported.json` remembers what was copied. The first time, macOS may ask
+   whether Python may access removable volumes: allow it. (Copying by hand still works: drop the file or a folder
+   named e.g. `EP12` into `1 Inbox`.)
    Once picked up, the footage moves to `Raw Footage`.
 3. You get "New recording", and 20-40 minutes later "Ready for review" (4K takes a while on the MacBook).
 4. Open **`HBB/2 Review/EP.12 <name>/`**:
    - watch `EP.12 <name>.mp4` and look at `cover.jpg`
    - read `YOUTUBE.txt` (title options, description, tags, pinned comment, card times)
+   - watch the vertical Shorts in `Shorts/` and read `SHORTS.txt` (2 per episode, 3 for a long one). Approving the
+     folder approves them too; they go live at 12:00 on the Wednesday, Friday (and Sunday) after the episode.
    - B-roll: the script's B-roll moments are already covered by animated explainers (like EP.11 v3). If you still want
      a real clip somewhere, save it as `broll_01.mp4` ... in the episode's `B-roll` folder and say where in
      `CHANGES.txt`; the video is rendered again by itself ("Updated" notification).
@@ -21,6 +27,8 @@
      ("use the first take of the intro", "the on-screen text at 02:10 should say ...", "title option 2").
      Claude redoes it. If it's a lasting rule, say so; it goes into `System/pipeline/EDITOR_NOTES.md` for every future video.
    - **Happy?** Drag the whole folder into **`3 Approved`**.
+   - **No time?** Nothing is skipped: Thursday 18:00 you get a reminder, and Friday 18:00 the oldest episode still in
+     `2 Review` (without a `CHANGES.txt`) is approved as it is when the coming Monday is still empty ("Auto-approved").
 5. Approved: uploaded right away as private with a publish time (next free Monday 09:00 Lisbon), with the thumbnail,
    subtitles, description and tags. YouTube publishes it itself.
 6. Cards and end screen: Claude adds them in YouTube Studio through Claude in Chrome (the API can't set those),
@@ -29,6 +37,8 @@
 7. LinkedIn: about 10 minutes after it's live, Claude posts the launch post from `LINKEDIN.txt` (after your yes in the
    chat only if not approved with the episode) and puts the YouTube link in the first comment; see `LinkedIn Posting.md`.
 8. After it's live: Claude posts the pinned comment from `YOUTUBE.txt` under the video and pins it (Monday run).
+9. Comments: every morning Claude reads new YouTube and LinkedIn comments and drafts replies in the chat.
+   Claude never posts a reply: you copy the ones you like.
 
 ## What the edit does
 - **Retakes and pauses**: every paragraph of the production table is matched to the transcript; the last complete
@@ -47,7 +57,9 @@
 - **Sound**: rumble filter, light denoise (the LG air conditioner), gentle compression, loudness -14 LUFS for YouTube.
 
 ## Settings (`System/pipeline/config.json`)
-- `autopilot.first_slot_date`: no video goes live before this day (set to 2026-11-30 so Ep 12 is the first). Clear it once it has passed.
+- `autopilot.first_slot_date`: no video goes live before this day (set to 2026-11-23 so Ep 12 is the first). Clear it once it has passed.
+- `autopilot.review_deadline`: reminder / auto-approve times (`"thu 18:00"`, `"fri 18:00"`); `"on": false` turns it off.
+- `autopilot.card_import`: SD card import; `since` (only clips recorded after it), `min_seconds` (shorter test clips are ignored).
 - `autopilot.post_times`: e.g. `{"mon": ["09:00"], "thu": ["17:00"]}` for two slots a week.
 - `look.face_x` / `face_y`: where your face sits in the frame (0..1), used for punch-ins and the thumbnail.
 - `brand`: name, role line, tagline and colours used on the cards.
