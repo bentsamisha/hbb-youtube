@@ -137,6 +137,8 @@
   "first_slot_date": "2026-11-23",
   "linkedin_approve_with_episode": true,
   "shorts": {"on": true, "days_after": [2, 4, 6], "time": "12:00"},
+  "review_deadline": {"on": true, "remind": "thu 18:00", "approve": "fri 18:00"},
+  "card_import": {"on": true, "since": "2026-11-20T10:00:00+00:00", "min_seconds": 60},
   "youtube": true,
   "category_id": "27",
   "playlist_id": "",

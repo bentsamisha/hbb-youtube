@@ -1039,6 +1039,131 @@ def collect_thumbnails():
         notify("Thumbnail added", "%s: THUMBNAIL%s is in the folder" % (ep, ext))
 
 
+# ---------------------------------------------------------------- camera card import
+# Put the Sony card in the Mac: new clips are copied into "1 Inbox" by themselves (one clip = one episode,
+# the script is recognised from what he says). The card is never changed; System/imported.json remembers what was copied.
+
+def card_cfg():
+    return {"on": True, "since": "2026-11-20T10:00:00+00:00", "min_seconds": 60, **acfg().get("card_import", {})}
+
+
+def import_card():
+    c = card_cfg()
+    if not c["on"]:
+        return
+    clips = sorted(glob.glob("/Volumes/*/PRIVATE/M4ROOT/CLIP/*.MP4") + glob.glob("/Volumes/*/PRIVATE/M4ROOT/CLIP/*.mp4"))
+    if not clips:
+        return
+    seen_path = os.path.join(SYSTEM, "imported.json")
+    seen = read_json(seen_path, {}) or {}
+    since = datetime.fromisoformat(c["since"]).timestamp() if c.get("since") else 0
+    copied = []
+    for clip in clips:
+        try:
+            st = os.stat(clip)
+        except OSError:
+            continue
+        key = "%s|%d|%d" % (os.path.basename(clip), st.st_size, int(st.st_mtime))
+        if key in seen or st.st_mtime < since:
+            continue
+        try:
+            dur = editor.probe(clip)["duration"]
+        except Exception as e:
+            log("card: cannot read", clip, e)
+            continue
+        if dur < c["min_seconds"]:
+            seen[key] = {"skipped": "short test clip (%d s)" % dur, "at": time.time()}
+            write_json(seen_path, seen)
+            continue
+        name = os.path.basename(clip)
+        raw = os.path.join(DIRS["raw"], name)
+        if os.path.exists(raw) and os.path.getsize(raw) == st.st_size:
+            seen[key] = {"skipped": "already in Raw Footage", "at": time.time()}
+            write_json(seen_path, seen)
+            continue
+        dest = os.path.join(DIRS["inbox"], name)
+        if os.path.exists(dest) or os.path.exists(os.path.join(DIRS["raw"], name)):
+            dest = os.path.join(DIRS["inbox"], "%s %s" % (time.strftime("%Y%m%d"), name))
+        part = os.path.join(DIRS["inbox"], "." + os.path.basename(dest) + ".part")
+        notify("Card", "Copying %s (%d min) into 1 Inbox" % (name, dur / 60))
+        shutil.copy2(clip, part)
+        if os.path.getsize(part) != st.st_size:
+            os.remove(part)
+            log("card: copy of", name, "incomplete, retrying next tick")
+            continue
+        os.rename(part, dest)
+        os.utime(dest)  # fresh mtime so the inbox waits a moment before taking it
+        seen[key] = {"inbox": os.path.basename(dest), "seconds": round(dur), "at": time.time()}
+        write_json(seen_path, seen)
+        copied.append(name)
+    if copied:
+        notify("Card imported", "%d clip(s) copied: %s. You can eject the card." % (len(copied), ", ".join(copied)))
+
+
+# ---------------------------------------------------------------- review deadline
+# Nothing gets skipped: Thursday evening a reminder, Friday 18:00 the oldest episode still in "2 Review"
+# is approved as it is when the coming Monday has nothing scheduled.
+
+def deadline_cfg():
+    return {"on": True, "remind": "thu 18:00", "approve": "fri 18:00", **acfg().get("review_deadline", {})}
+
+
+def _due(spec, now):
+    day, hm = spec.split()
+    h, m = map(int, hm.split(":"))
+    return DAYS[now.weekday()] == day and (now.hour, now.minute) >= (h, m)
+
+
+def _ep_no(job):
+    m = re.search(r"(\d+)", job.get("episode") or "")
+    return int(m.group(1)) if m else 999
+
+
+def review_candidates():
+    out = []
+    for folder, job in jobs_in("review"):
+        if job.get("stage") == "failed" or job.get("sample") or job.get("hold") or "(FAILED)" in folder:
+            continue
+        if os.path.exists(os.path.join(folder, "CHANGES.txt")) or not main_video(folder):
+            continue
+        out.append((folder, job))
+    return sorted(out, key=lambda fj: (_ep_no(fj[1]), fj[1].get("created", 0)))
+
+
+def review_deadline():
+    c = deadline_cfg()
+    if not c["on"]:
+        return
+    tz = ZoneInfo(acfg().get("timezone", "Europe/Lisbon"))
+    now = datetime.now(tz)
+    slot = next_slot()
+    if slot - now > timedelta(days=4):
+        return  # the coming Monday is already covered
+    week = now.strftime("%G-W%V")
+    stamp_path = os.path.join(DIRS["logs"], "review_deadline.json")
+    stamp = read_json(stamp_path, {}) or {}
+    cands = review_candidates()
+    if _due(c["remind"], now) and stamp.get("reminded") != week:
+        stamp["reminded"] = week
+        write_json(stamp_path, stamp)
+        if cands:
+            notify("Review reminder", "%s goes live %s. It will be approved as it is %s unless you write CHANGES.txt" % (
+                cands[0][1].get("episode"), slot.strftime("%a %d %b %H:%M"), c["approve"].replace("fri", "Friday")))
+        else:
+            notify("Nothing to publish", "No episode is ready for %s. Record or drop one in 1 Inbox." % slot.strftime("%a %d %b"))
+    if _due(c["approve"], now) and stamp.get("approved") != week and cands:
+        folder, job = cands[0]
+        job.update(auto_approved=time.time())
+        write_json(info(folder, "job.json"), job)
+        dest = os.path.join(DIRS["approved"], os.path.basename(folder))
+        shutil.move(folder, dest)
+        stamp["approved"] = week
+        stamp["approved_episode"] = job.get("episode")
+        write_json(stamp_path, stamp)
+        log("auto-approved", job.get("episode"), "for", slot.isoformat())
+        notify("Auto-approved", "%s was still in 2 Review: approved as it is for %s" % (job.get("episode"), slot.strftime("%a %d %b %H:%M")))
+
+
 def tick():
     for d in DIRS.values():
         os.makedirs(d, exist_ok=True)
@@ -1051,7 +1176,8 @@ def tick():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return  # another tick is still working (a render takes a while)
-    for step in (process_approved, process_scheduled, process_shorts, sync_scripts, process_changes, process_inbox, cleanup_posted, check_queue):
+    for step in (review_deadline, process_approved, process_scheduled, process_shorts, sync_scripts, import_card, process_changes,
+                 process_inbox, cleanup_posted, check_queue):
         try:
             step()
         except Exception:
