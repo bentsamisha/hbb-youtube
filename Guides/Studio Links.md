@@ -26,4 +26,9 @@ The YouTube API can't add cards or end-screen elements, so this step happens in 
 3. End screen: Editor > End screen > use the template with 2 videos + subscribe, or add elements one by one;
    start at `end_screen.from` (the last 12 s of the video are designed for it, the two boxes sit over the empty
    slots on the end card). "Best for viewer" is fine when a named video doesn't exist yet. Save.
+   Studio's smallest video element is 32.3% of the width and two elements may not sit close together, so use
+   the minimum size and put them at x 15% (Watch next) and x 53% (right slot), y 45%; Subscribe goes top-right.
+   Episodes rendered before 20 Nov have smaller gold boxes; the elements then slightly overhang them, which is fine.
+   Link cards (to the website) are disabled on this channel until it joins the YouTube Partner Program: skip them.
+   In Chrome, work in the tab that is in front: a background tab can't be screenshotted.
 4. Check the preview once, then set the to-do's status to "done" and write a one-line `result`.
