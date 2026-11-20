@@ -752,11 +752,48 @@ def studio_after_live(folder, job):
         write_json(studio_queue_path(), q)
 
 
+def reschedule(folder, job):
+    """job.json "move_to" (e.g. "2026-11-23 09:00", Lisbon time): move an uploaded episode to a new go-live time.
+    Updates YouTube publishAt, the job slot, YOUTUBE.txt and the LinkedIn queue item."""
+    tz = ZoneInfo(acfg().get("timezone", "Europe/Lisbon"))
+    new = datetime.fromisoformat(str(job["move_to"]).replace(" ", "T"))
+    new = new.replace(tzinfo=tz) if new.tzinfo is None else new.astimezone(tz)
+    if new < datetime.now(timezone.utc) + timedelta(minutes=30):
+        raise ValueError("move_to %s is in the past or too close" % new.isoformat())
+    yt = job.get("youtube") or {}
+    if yt.get("id"):
+        pub.youtube_reschedule(yt["id"], new.astimezone(timezone.utc))
+        yt["publish_at"] = new.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        job["youtube"] = yt
+    old = job.get("slot")
+    job.update(slot=new.isoformat(), rescheduled={"from": old, "to": new.isoformat(), "at": time.time()})
+    job.pop("move_to", None)
+    write_json(info(folder, "job.json"), job)
+    q = read_json(linkedin_queue_path(), []) or []
+    for x in q:
+        if yt.get("id") and x.get("video_id") == yt.get("id") and x.get("status") != "posted":
+            x["post_at"] = (new + timedelta(minutes=acfg().get("linkedin_delay_minutes", 10))).isoformat()
+    write_json(linkedin_queue_path(), q)
+    write_upload_kit(folder)
+    log("rescheduled", job.get("episode"), old, "->", new.isoformat())
+    notify("Rescheduled", "%s now goes live %s" % (job.get("episode"), new.strftime("%a %d %b %H:%M")))
+
+
 def process_scheduled():
     now = datetime.now(timezone.utc)
     for folder, job in jobs_in("scheduled"):
         if not job.get("slot"):
             shutil.move(folder, os.path.join(DIRS["approved"], os.path.basename(folder)))
+            continue
+        if job.get("move_to"):
+            try:
+                reschedule(folder, job)
+            except Exception as e:
+                log("reschedule failed:", e)
+                notify("Reschedule failed", "%s: %s" % (job.get("episode"), e))
+                job["move_to_error"] = str(e)
+                job.pop("move_to", None)
+                write_json(info(folder, "job.json"), job)
             continue
         if now < datetime.fromisoformat(job["slot"]) + timedelta(minutes=10):
             continue
