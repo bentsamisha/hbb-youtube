@@ -835,17 +835,41 @@ def zoom_at(c, local, cfg):
     return z
 
 
-def warp(src, z, shift, cfg):
+def warp(src, z, shift, cfg, out=(W, H)):
     SH, SW = src.shape[:2]
+    OW, OH = out
     cx, cy = cfg["look"]["face_x"], cfg["look"]["face_y"]
     cw = 1.0 / z
     cx = min(max(cx, cw / 2), 1 - cw / 2)
     cy = min(max(cy, cw / 2), 1 - cw / 2)
-    a = SW / (W * z)
+    a = SW / (OW * z)
     bx = (cx - cw / 2) * SW
     by = (cy - cw / 2) * SH
     M = np.float32([[a, 0, bx - a * shift], [0, a, by]])
-    return cv2.warpAffine(src, M, (W, H), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+    return cv2.warpAffine(src, M, (OW, OH), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+
+
+def overlay_graphics(cam, show, t, scale):
+    """Final 4K: the camera is warped at full resolution; the graphics are drawn at 1920x1080 twice (on black and on
+    white) to recover their exact colour and alpha, scaled up, and laid over the 4K camera."""
+    gb = np.zeros((H, W, 3), np.uint8)
+    gw = np.full((H, W, 3), 255, np.uint8)
+    show.draw(gb, t)
+    show.draw(gw, t)
+    a = (255 - (gw.astype(np.int16) - gb.astype(np.int16)).max(axis=2)).clip(0, 255).astype(np.uint8)
+    rows = np.where(a.max(axis=1) > 0)[0]
+    if not len(rows):
+        return cam
+    cols = np.where(a.max(axis=0) > 0)[0]
+    y0, y1 = max(0, rows[0] - 2), min(H, rows[-1] + 3)
+    x0, x1 = max(0, cols[0] - 2), min(W, cols[-1] + 3)
+    sz = ((x1 - x0) * scale, (y1 - y0) * scale)
+    g = cv2.resize(gb[y0:y1, x0:x1], sz, interpolation=cv2.INTER_CUBIC)
+    al = cv2.resize(a[y0:y1, x0:x1], sz, interpolation=cv2.INTER_CUBIC)
+    region = cam[y0 * scale:y1 * scale, x0 * scale:x1 * scale]
+    inv = (255 - al).astype(np.uint16)[..., None]
+    region[:] = np.minimum(255, (region.astype(np.uint16) * inv + 127) // 255 + g).astype(np.uint8)
+    return cam
 
 
 def decode(source, c, size, hw):
@@ -926,8 +950,11 @@ def mix_music(voice, voice_end, endsec, cfg):
     os.replace(tmp, voice)
 
 
-def encoder(cfg):
+def encoder(cfg, scale=1):
     enc = cfg["output"].get("encoder", "auto")
+    if scale != 1:
+        cfg = dict(cfg, output=dict(cfg["output"], bitrate=cfg["output"].get("bitrate_4k", "45M"),
+                                    crf=cfg["output"].get("crf_4k", cfg["output"].get("crf", 16))))
     if enc == "auto":
         encs = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
         enc = "h264_videotoolbox" if "h264_videotoolbox" in encs else "libx264"
@@ -936,7 +963,7 @@ def encoder(cfg):
     return ["-c:v", "libx264", "-preset", cfg["output"].get("preset", "medium"), "-crf", str(cfg["output"].get("crf", 16))]
 
 
-def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=print):
+def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=print, scale=1):
     """Cut + camera + graphics + end card -> out (mp4). stills: list of output seconds -> jpgs instead of a video.
     Returns (clips quantised to frames, voice_end, Show)."""
     fps = int(round(cfg["output"].get("fps") or edit["info"]["fps"]))
@@ -950,7 +977,9 @@ def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=prin
     t_from, t_to = (part or (0, full))
     t_to = min(t_to, full)
     tight = cfg["look"].get("zoom_punch", 1.2) * (1 + cfg["look"].get("slow_zoom", 0.08))
-    size = (int(W * min(tight, edit["info"]["width"] / W) / 2) * 2, int(H * min(tight, edit["info"]["height"] / H) / 2) * 2)
+    scale = 1 if stills else int(scale)
+    OW, OH = W * scale, H * scale
+    size = (int(OW * min(tight, edit["info"]["width"] / OW) / 2) * 2, int(OH * min(tight, edit["info"]["height"] / OH) / 2) * 2)
     hw = sys.platform == "darwin"
     still_k = {round(s * fps) for s in (stills or [])}
     enc = None
@@ -958,9 +987,9 @@ def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=prin
     if not stills:
         build_voice(edit["source"], clips, fps, voice, cfg, endsec + 1)
         mix_music(voice, voice_end, endsec, cfg)
-        enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (W, H),
+        enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (OW, OH),
                                 "-r", str(fps), "-i", "-", "-ss", "%.3f" % t_from, "-t", "%.3f" % (t_to - t_from),
-                                "-i", voice, "-vf", "scale=out_color_matrix=bt709:out_range=tv"] + encoder(cfg) +
+                                "-i", voice, "-vf", "scale=out_color_matrix=bt709:out_range=tv"] + encoder(cfg, scale) +
                                ["-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc",
                                 "bt709", "-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart", out],
                                stdin=subprocess.PIPE)
@@ -980,12 +1009,15 @@ def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=prin
                 continue
             s, f = show.camera_state(t)
             if f >= 0.999:
-                frame = np.empty((H, W, 3), np.uint8)
+                frame = np.empty((OH, OW, 3), np.uint8)
             else:
                 z = zoom_at(c, i, cfg)
                 z = z + (1.0 - z) * s
-                frame = warp(src, z, SHIFT * s, cfg)
-            show.draw(frame, t)
+                frame = warp(src, z, SHIFT * s * scale, cfg, (OW, OH))
+            if scale == 1:
+                show.draw(frame, t)
+            else:
+                frame = overlay_graphics(frame, show, t, scale)
             if stills:
                 cv2.imwrite(os.path.join(out, "still_%07.2f.jpg" % t), frame[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 88])
             else:
@@ -1003,7 +1035,10 @@ def render_video(edit, words, tl_cls, cfg, out, part=None, stills=None, log=prin
                     cv2.imwrite(os.path.join(out, "still_%07.2f.jpg" % t), show.end_card(tl_)[..., ::-1],
                                 [cv2.IMWRITE_JPEG_QUALITY, 88])
                 continue
-            enc.stdin.write(show.end_card(tl_).tobytes())
+            ec = show.end_card(tl_)
+            if scale != 1:
+                ec = cv2.resize(ec, (OW, OH), interpolation=cv2.INTER_CUBIC)
+            enc.stdin.write(ec.tobytes())
     if enc:
         enc.stdin.close()
         enc.wait()

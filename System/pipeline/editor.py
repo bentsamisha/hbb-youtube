@@ -556,7 +556,7 @@ def find_broll(jd, edit):
     return [b for b in edit.get("broll", []) if b.get("file") and b.get("t") is not None]
 
 
-def broll_pass(body, brolls, tl, voice_end, fps, out, cfg):
+def broll_pass(body, brolls, tl, voice_end, fps, out, cfg, scale=1):
     """Real B-roll clips (if any were dropped in) go full frame over the finished picture, voice continues."""
     import motion
     inputs = ["-i", body]
@@ -566,17 +566,18 @@ def broll_pass(body, brolls, tl, voice_end, fps, out, cfg):
         dur = min(b["dur"], max(0.5, voice_end - t0 - 0.2))
         loop = ["-loop", "1"] if b["file"].lower().endswith((".jpg", ".png")) else ["-stream_loop", "-1"]
         inputs += loop + ["-t", "%.2f" % dur, "-i", b["file"]]
-        graph.append("[%d:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=%s,format=yuva420p,"
+        ow, oh = 1920 * scale, 1080 * scale
+        graph.append("[%d:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,fps=%s,format=yuva420p,"
                      "fade=t=in:d=0.35:alpha=1,fade=t=out:st=%.2f:d=0.35:alpha=1,setpts=PTS-STARTPTS+%.3f/TB[b%d]"
-                     % (k + 1, fps, max(0.1, dur - 0.35), t0, k))
+                     % (k + 1, ow, oh, ow, oh, fps, max(0.1, dur - 0.35), t0, k))
         graph.append("[%s][b%d]overlay=eof_action=pass:enable='between(t,%.3f,%.3f)'[v%d]" % (last, k, t0, t0 + dur, k))
         last = "v%d" % k
     run(["ffmpeg", "-v", "error", "-y"] + inputs + ["-filter_complex", ";".join(graph), "-map", "[%s]" % last, "-map", "0:a",
-                                                    "-pix_fmt", "yuv420p"] + motion.encoder(cfg) +
+                                                    "-pix_fmt", "yuv420p"] + motion.encoder(cfg, scale) +
         ["-c:a", "copy", "-movflags", "+faststart", out])
 
 
-def render(job, part=None, log=print, stills=None):
+def render(job, part=None, log=print, stills=None, final4k=False):
     """edit.json (or draft.json) -> final.mp4 in the published EP.11 v3 look (see motion.py).
     part=(from, to) in output seconds renders a piece to sample.mp4; stills=[source seconds] writes stills/*.jpg."""
     import motion
@@ -593,18 +594,19 @@ def render(job, part=None, log=print, stills=None):
         motion.render_video(edit, words, Timeline, cfg, sd, stills=outs, log=log)
         log("stills in", sd)
         return sd
-    out = os.path.join(jd, "final.mp4" if part is None else "sample.mp4")
+    scale = 2 if final4k else 1
+    out = os.path.join(jd, "final_4k.mp4" if final4k else "final.mp4" if part is None else "sample.mp4")
     brolls = find_broll(jd, edit)
     target = out + ".body.mp4" if brolls else out
     log("render %s: %d cuts, %d graphics, %d B-roll clips" % (job, len(edit["keep"]), len(edit.get("graphics", [])), len(brolls)))
-    clips, voice_end, show, tl = motion.render_video(edit, words, Timeline, cfg, target, part=part, log=log)
+    clips, voice_end, show, tl = motion.render_video(edit, words, Timeline, cfg, target, part=part, log=log, scale=scale)
     if brolls:
         fps = int(round(cfg["output"].get("fps") or edit["info"]["fps"]))
-        broll_pass(target, brolls, tl, voice_end, fps, out, cfg)
+        broll_pass(target, brolls, tl, voice_end, fps, out, cfg, scale)
         os.remove(target)
     if show.A.misses:
         log("graphics not placed: " + "; ".join(show.A.misses))
-    if part is None:
+    if part is None and not final4k:
         write_srt(caption_chunks(words, tl, cfg), os.path.join(jd, "captions.srt"))
         post = read_json(os.path.join(jd, "post.json"), {}) or {}
         thumb = post.get("thumbnail") or {}

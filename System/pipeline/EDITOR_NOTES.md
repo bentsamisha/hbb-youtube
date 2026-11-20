@@ -27,3 +27,5 @@ The Claude editor reads this before every edit and appends a dated line when a c
 - 2026-11-20 (Ep 13 review): when he repeats a phrase ("in July ... in July") or restarts a sentence, keep only the
   last complete version; never leave both. Drop throwaway fragments between two lines (e.g. a half-started aside
   before "I'm not a lawyer") so one line runs straight into the next.
+- 2026-11-20: review renders are 1080p (fast); when a folder moves to 3 Approved the pipeline renders the final in 4K
+  (camera at full 4K, graphics drawn at HD and scaled) and uploads that. Nothing to do in edit.json.
