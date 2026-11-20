@@ -769,10 +769,12 @@ class Show:
               W / 2, 390, ease_out(ramp(tl_, 0.6, 0.6)), anchor="tc")
         # two 16:9 slots where YouTube's end-screen videos go, and the site underneath
         e = ease_out(ramp(tl_, 0.9, 0.6))
-        vw, vh = 560, 315
-        for x, lab in ((W / 2 - vw - 40, "Watch next"), (W / 2 + 40, "Start with this one")):
-            blend(f, rrect(vw, vh, 16, None, stroke=GOLD, sw=4), x, 500, e)
-            blend(f, label(lab, GREY, 22), x + vw / 2, 500 + vh + 18, e, anchor="tc")
+        # sized for YouTube's smallest end-screen video (32.3% of the width) with the spacing Studio accepts:
+        # in Studio put the two videos at x 15% and 53%, y 45% (Guides/Studio Links.md)
+        vw, vh = 620, 349
+        for x, lab in ((W / 2 - vw - 52, "Watch next"), (W / 2 + 52, "Start with this one")):
+            blend(f, rrect(vw, vh, 16, None, stroke=GOLD, sw=4), x, 486, e)
+            blend(f, label(lab, GREY, 22), x + vw / 2, 486 + vh + 16, e, anchor="tc")
         blend(f, text(b.get("site", "honeybadgerandbees.com"), "sans", 30, 600, NAVY), W / 2, 1000,
               ease_out(ramp(tl_, 1.1, 0.6)), anchor="tc")
         return f
