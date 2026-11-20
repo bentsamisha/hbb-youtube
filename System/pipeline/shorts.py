@@ -29,9 +29,16 @@ import motion  # noqa: E402
 
 OW, OH = 1080, 1920
 TAIL = 2.4            # seconds of end tag after the last word
-FACE_Y = 0.45         # where his eyes sit in the vertical frame (0 = top), below the title card
-BASE = 1.08           # a little tighter than full height, so the face can sit lower
-PUNCH = 1.2
+BASE = 1.0            # zoom of the plain clips (1 = full camera height)
+PUNCH = 1.08          # zoom of every second clip
+PUSH = 0.025          # slow push over a clip
+TITLE_Y = 30          # title card top
+HEAD_GAP = 16         # free space between the title card and his hair
+LOW_GAP = 24          # free space between his chin and the key-line cards
+FACE_MODEL = os.path.join(PIPE, "assets", "models", "face_yunet.onnx")  # OpenCV Zoo YuNet (Apache-2.0)
+
+# Layout rule (Mykhailo, 20 Nov 2026): nothing may cover his face. The face is found in every clip, the picture is
+# placed so his hair starts under the title card, and the key-line cards and captions sit below his chin.
 
 
 def _tok(s):
@@ -78,7 +85,7 @@ def chunks(ws, max_words=3, max_chars=16):
 _CAP = {}
 
 
-def caption_sprite(words, hot, size=96):
+def caption_sprite(words, hot, size=88):
     """One caption group, white with a dark outline; word index `hot` in gold. Wraps to two lines if needed."""
     key = (tuple(w["w"] for w in words), hot, size)
     if key in _CAP:
@@ -120,20 +127,20 @@ def title_card(title, kicker):
     key = (title, kicker)
     if key in _TITLE:
         return _TITLE[key]
-    size, max_w = 56, 860
+    size, max_w = 50, 900
     n_lines = text(title, "serif", size, 600, CREAM, max_w=max_w).shape[0]
     while max_w > 400 and text(title, "serif", size, 600, CREAM, max_w=max_w - 20).shape[0] == n_lines:
         max_w -= 20  # balanced lines: the narrowest width that keeps the same number of lines
     t = text(title, "serif", size, 600, CREAM, max_w=max_w, lh=1.1, align="center")
     k = text(kicker.upper(), "sans", 30, 700, GOLD, track=3) if kicker else None
     w = max(t.shape[1], k.shape[1] if k is not None else 0) + 90
-    h = t.shape[0] + (k.shape[0] + 10 if k is not None else 0) + 64
+    h = t.shape[0] + (k.shape[0] + 8 if k is not None else 0) + 44
     card = rrect(w, h, 28, NAVY, 236, stroke=GOLD, sw=4, shadow=14).copy()
     pad = (card.shape[1] - w) // 2
-    y = pad + 32
+    y = pad + 22
     if k is not None:
         blend_rgba(card, k, (card.shape[1] - k.shape[1]) // 2, y)
-        y += k.shape[0] + 10
+        y += k.shape[0] + 8
     blend_rgba(card, t, (card.shape[1] - t.shape[1]) // 2, y)
     _TITLE[key] = card
     return card
@@ -149,16 +156,87 @@ def blend_rgba(dst, src, x, y):
     dst[y:y + h, x:x + w] = roi.astype(np.uint8)
 
 
-def crop_vertical(src, z, cfg):
-    """9:16 window around his face from a 16:9 frame, z = zoom (1 = full height)."""
+_FD = []
+
+
+def face_detector():
+    if not _FD:
+        d = None
+        try:
+            if os.path.exists(FACE_MODEL) and hasattr(cv2, "FaceDetectorYN"):
+                d = cv2.FaceDetectorYN.create(FACE_MODEL, "", (320, 320), 0.6)
+        except Exception:
+            d = None
+        _FD.append(d)
+    return _FD[0]
+
+
+def grab(source, t, w=960):
+    """One frame (RGB, w wide) at source second t."""
+    p = subprocess.run(["ffmpeg", "-v", "error", "-ss", "%.3f" % max(0.0, t), "-i", source, "-frames:v", "1",
+                        "-vf", "scale=%d:-2" % w, "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True)
+    if not p.stdout:
+        return None
+    return cv2.imdecode(np.frombuffer(p.stdout, np.uint8), cv2.IMREAD_COLOR)
+
+
+def head_box(source, ts, SW, SH):
+    """His head (hair to chin) in source pixels over the moments ts: {cx, top, bottom}, or None if not found."""
+    d = face_detector()
+    if d is None:
+        return None
+    xs, tops, bots = [], [], []
+    for t in ts:
+        img = grab(source, t)
+        if img is None:
+            continue
+        d.setInputSize((img.shape[1], img.shape[0]))
+        _, faces = d.detect(img)
+        if faces is None or not len(faces):
+            continue
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])[:4]
+        k = SW / img.shape[1]
+        xs.append((x + w / 2) * k)
+        tops.append((y - 0.22 * h) * k)   # the box starts at the hairline: hair adds about a fifth
+        bots.append((y + 1.04 * h) * k)   # and ends at the chin
+    if not xs:
+        return None
+    return {"cx": float(np.median(xs)), "top": float(min(tops)), "bottom": float(max(bots))}
+
+
+def plan_layout(source, clips, fps, cfg, SW, SH, title_h, pop_h=0, log=print):
+    """Per clip: where his head is. For the Short: where the cards and captions go (below the lowest chin)."""
+    boxes = []
+    for c in clips:
+        d = c["frames"] / fps
+        boxes.append(head_box(source, [c["src_in"] + d * f for f in (0.15, 0.5, 0.85)], SW, SH))
+    found = [b for b in boxes if b]
+    if found:
+        fb = {k: float(np.median([b[k] for b in found])) for k in ("cx", "top", "bottom")}
+    else:
+        log("  shorts: face not found, using look.face_x/face_y")
+        cy = cfg["look"].get("face_y", 0.4) * SH
+        fb = {"cx": cfg["look"].get("face_x", 0.6) * SW, "top": cy - 0.22 * SH, "bottom": cy + 0.24 * SH}
+    head_top = TITLE_Y + title_h + HEAD_GAP
+    low = 0
+    for c, b in zip(clips, boxes):
+        c["head"] = b or fb
+        zmax = c["level"] * (1 + PUSH)
+        low = max(low, head_top + (c["head"]["bottom"] - c["head"]["top"]) * OH * zmax / SH)
+    pop_y = int(low + LOW_GAP)
+    cap_y = int(min(pop_y + max(pop_h - 14, 0) + 125, OH - 150))
+    return {"head_top": head_top, "pop_y": pop_y, "cap_y": cap_y}
+
+
+def crop_vertical(src, z, head, head_top):
+    """9:16 window from a 16:9 frame, z = zoom (1 = full height), his hair placed at output row head_top.
+    Above the camera picture (when his head sits high) the top row is stretched: it stays under the title card."""
     SH, SW = src.shape[:2]
     ch = SH / z
     cw = ch * OW / OH
-    cx = cfg["look"].get("face_x", 0.6) * SW
-    cy = cfg["look"].get("face_y", 0.4) * SH
-    x0 = min(max(cx - cw / 2, 0), SW - cw)
-    y0 = min(max(cy - FACE_Y * ch, 0), SH - ch)
     a = ch / OH
+    x0 = min(max(head["cx"] - cw / 2, 0), SW - cw)
+    y0 = min(head["top"] - head_top * a, SH - ch)
     M = np.float32([[a, 0, x0], [0, a, y0]])
     return cv2.warpAffine(src, M, (OW, OH), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
 
@@ -228,16 +306,17 @@ def short_pops(short, words, ranges):
     return out
 
 
-def draw(frame, t, dur, voice_end, title, kicker, groups, pops=()):
+def draw(frame, t, dur, voice_end, title, kicker, groups, pops=(), lay=None):
+    lay = lay or {"pop_y": 1290, "cap_y": 1560}
     # title card: drops in, stays
     tc = title_card(title, kicker)
     p = ease_out(ramp(t, 0.1, 0.5))
-    blend(frame, tc, OW / 2, 64 - 40 * (1 - p), p, anchor="tc")
-    # key-line cards between the face and the captions
+    blend(frame, tc, OW / 2, TITLE_Y - 40 * (1 - p), p, anchor="tc")
+    # key-line cards under his chin, captions under them: never over his face
     for p in pops:
         if p["s"] <= t < p["e"]:
             a = ease_out(ramp(t, p["s"], 0.35)) * (1 - ramp(t, p["e"] - 0.25, 0.25))
-            blend(frame, pop_sprite(p["text"], p["accent"]), OW / 2, 905 + 30 * (1 - a), a,
+            blend(frame, pop_sprite(p["text"], p["accent"]), OW / 2, lay["pop_y"] + 30 * (1 - a), a,
                   scale=0.92 + 0.08 * a, anchor="tc")
     # captions
     for g in groups:
@@ -247,7 +326,7 @@ def draw(frame, t, dur, voice_end, title, kicker, groups, pops=()):
                 if t >= w["s"] - 0.03:
                     hot = i
             sc = 0.86 + 0.14 * ease_out(ramp(t, g["s"] - 0.02, 0.12))
-            blend(frame, caption_sprite(g["words"], hot), OW / 2, 1290, 1.0, scale=sc, anchor="c")
+            blend(frame, caption_sprite(g["words"], hot), OW / 2, lay["cap_y"], 1.0, scale=sc, anchor="c")
             break
     # progress bar
     fill(frame, 0, OH - 14, OW, 14, NAVY, 0.55)
@@ -280,6 +359,9 @@ def render_short(edit, words, cfg, short, out, log=print, stills=None):
     pops = short_pops(short, apply_all(words, cfg, edit, short), [[c["src_in"], c["src_out"]] for c in clips])
     title, kicker = short.get("title", ""), short.get("kicker", "")
     SW, SH = edit["info"]["width"], edit["info"]["height"]
+    pop_h = max([pop_sprite(p["text"], p["accent"]).shape[0] for p in pops] or [0])
+    lay = plan_layout(edit["source"], clips, fps, cfg, SW, SH, title_card(title, kicker).shape[0] - 28, pop_h, log)
+    log("  layout %s" % lay)
     hw = sys.platform == "darwin"
     still_k = {round(s * fps) for s in (stills or [])}
     enc = None
@@ -304,10 +386,10 @@ def render_short(edit, words, cfg, short, out, log=print, stills=None):
             if stills and (k + i) not in still_k:
                 continue
             t = (k + i) / fps
-            z = c["level"] * (1.0 + 0.035 * i / max(1, n - 1))
-            frame = crop_vertical(src, z, cfg)
-            last = (src, z)
-            draw(frame, t, dur, voice_end, title, kicker, groups, pops)
+            z = c["level"] * (1.0 + PUSH * i / max(1, n - 1))
+            frame = crop_vertical(src, z, c["head"], lay["head_top"])
+            last = (src, z, c["head"])
+            draw(frame, t, dur, voice_end, title, kicker, groups, pops, lay)
             if stills:
                 cv2.imwrite(os.path.join(out, "short_%05.2f.jpg" % t), frame[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 88])
             else:
@@ -320,8 +402,8 @@ def render_short(edit, words, cfg, short, out, log=print, stills=None):
             continue
         if last is None:
             continue
-        frame = crop_vertical(last[0], last[1], cfg)
-        draw(frame, t, dur, voice_end, title, kicker, groups, pops)
+        frame = crop_vertical(last[0], last[1], last[2], lay["head_top"])
+        draw(frame, t, dur, voice_end, title, kicker, groups, pops, lay)
         if stills:
             cv2.imwrite(os.path.join(out, "short_%05.2f.jpg" % t), frame[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 88])
         else:
