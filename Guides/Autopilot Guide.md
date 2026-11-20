@@ -14,6 +14,8 @@
 4. Open **`HBB/2 Review/EP.12 <name>/`**:
    - watch `EP.12 <name>.mp4` and look at `cover.jpg`
    - read `YOUTUBE.txt` (title options, description, tags, pinned comment, card times)
+   - watch the vertical Shorts in `Shorts/` and read `SHORTS.txt` (2 per episode, 3 for a long one). Approving the
+     folder approves them too; they go live at 12:00 on the Wednesday, Friday (and Sunday) after the episode.
    - B-roll: the script's B-roll moments are already covered by animated explainers (like EP.11 v3). If you still want
      a real clip somewhere, save it as `broll_01.mp4` ... in the episode's `B-roll` folder and say where in
      `CHANGES.txt`; the video is rendered again by itself ("Updated" notification).

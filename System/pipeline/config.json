@@ -136,6 +136,7 @@
   "min_lead_minutes": 90,
   "first_slot_date": "2026-11-23",
   "linkedin_approve_with_episode": true,
+  "shorts": {"on": true, "days_after": [2, 4, 6], "time": "12:00"},
   "youtube": true,
   "category_id": "27",
   "playlist_id": "",

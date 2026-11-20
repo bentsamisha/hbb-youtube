@@ -38,6 +38,7 @@ sys.path.insert(0, PIPE)
 import editor  # noqa: E402
 import publish as pub  # noqa: E402
 import scripts  # noqa: E402
+import shorts  # noqa: E402
 
 ROOT = editor.ROOT
 SYSTEM = editor.SYSTEM
@@ -379,6 +380,11 @@ def to_review(job, episode, summary=""):
             f.write(summary + "\n")
     write_upload_kit(folder)
     try:
+        render_shorts(folder, job_rec)
+    except Exception as e:
+        log("shorts:", traceback.format_exc())
+        notify("Shorts failed", "%s: %s" % (episode, str(e)[:120]))
+    try:
         thumb_queue_add(folder, job_rec)
     except Exception as e:
         log("thumbnail queue:", e)
@@ -503,6 +509,8 @@ def process_approved():
             continue
         slot = datetime.fromisoformat(job["slot"]) if job.get("slot") else next_slot(exclude=job.get("name"))
         job.update(slot=slot.isoformat(), approved=job.get("approved") or time.time(), stage="approved")
+        if job.get("shorts_rendered") and not job.get("shorts_ok"):
+            job["shorts_ok"] = time.time()  # approving the folder approves the Shorts in it
         write_json(info(folder, "job.json"), job)
         if not acfg().get("youtube", True):
             job["stage"] = "scheduled"
@@ -730,8 +738,7 @@ def studio_after_upload(folder, job):
     studio_add({"key": "%s/links" % yt.get("id", job["name"]), "episode": job["episode"], "video_id": yt.get("id"),
                 "studio_url": "https://studio.youtube.com/video/%s/edit" % yt.get("id", ""),
                 "title": (job.get("youtube") or {}).get("title") or job.get("label", ""),
-                "cards": cards if any(re.search(r"estimate|honeybadgerandbees", c["target"], re.I) for c in cards) else
-                cards + [{"at": "highest-intent moment (the LinkedIn DM line)", "target": "Free Estimate (honeybadgerandbees.com)"}],
+                "cards": [c for c in cards if not re.search(r"estimate|honeybadgerandbees", c["target"], re.I)],  # link cards need YPP
                 "end_screen": {"from": end_at, "elements": post.get("end_screen", []) + ["Subscribe"]},
                 "waiting_for_next_video": later})
 
@@ -753,6 +760,135 @@ def studio_after_live(folder, job):
             if x["key"] == p["key"]:
                 x["waiting_for_next_video"] = []
         write_json(studio_queue_path(), q)
+
+
+# ---------------------------------------------------------------- Shorts (2-3 vertical clips per episode)
+# The editor picks them into edit.json "shorts" (EDITOR.md); shorts.py renders them into the episode folder's
+# "Shorts" subfolder for review. Approving the episode approves them; after the main upload they are scheduled on
+# the following days (autopilot.shorts.days_after at autopilot.shorts.time, Lisbon).
+
+def shorts_cfg():
+    return acfg().get("shorts") or {}
+
+
+def work_edit(job):
+    return read_json(os.path.join(DIRS["work"], job["name"], "edit.json")) or {}
+
+
+def render_shorts(folder, job):
+    if not shorts_cfg().get("on", True):
+        return False
+    edit = work_edit(job)
+    if not edit.get("shorts"):
+        return False
+    notify("Rendering Shorts", "%s: %d Shorts" % (job.get("episode"), len(edit["shorts"])))
+    files = shorts.render_all(job["name"], log=log)
+    sd = os.path.join(folder, "Shorts")
+    os.makedirs(sd, exist_ok=True)
+    for old in glob.glob(os.path.join(sd, "*.mp4")):
+        os.remove(old)
+    for f in files:
+        shutil.move(f, os.path.join(sd, os.path.basename(f)))
+    job.update(shorts_rendered=time.time(), shorts_n=len(files))
+    if job.get("stage") in ("approved", "scheduled") and not job.get("shorts_yt"):
+        job.pop("shorts_ok", None)  # rendered after approval: they wait for their own yes
+    write_json(info(folder, "job.json"), job)
+    write_shorts_txt(folder, job, edit)
+    return True
+
+
+def short_slots(job):
+    sc = shorts_cfg()
+    tz = ZoneInfo(acfg().get("timezone", "Europe/Lisbon"))
+    main = datetime.fromisoformat(job["slot"]).astimezone(tz)
+    h, m = map(int, sc.get("time", "12:00").split(":"))
+    out = []
+    for d in sc.get("days_after", [2, 4, 6]):
+        day = (main + timedelta(days=d)).date()
+        out.append(datetime(day.year, day.month, day.day, h, m, tzinfo=tz))
+    return out
+
+
+def short_text(s, job, edit):
+    url = (job.get("youtube") or {}).get("url") or "[link to the full episode]"
+    tags = s.get("hashtags") or ["#ISO42001", "#AIGovernance"]
+    if "#Shorts" not in tags:
+        tags = list(tags) + ["#Shorts"]
+    desc = editor.no_em_dash(s.get("description", s.get("title", "")))
+    desc += "\n\nFull episode: %s\n\n%s" % (url, " ".join(tags))
+    post = read_json(info(find_folder(job["name"]) or "", "post.json"), {}) or {}
+    return {"title": editor.no_em_dash(s.get("title", ""))[:95], "description": desc,
+            "tags": (post.get("tags") or [])[:15]}
+
+
+def write_shorts_txt(folder, job, edit):
+    lines = ["SHORTS FOR %s (vertical, in the Shorts folder)" % job.get("episode"), ""]
+    slots = short_slots(job) if job.get("slot") else []
+    for i, s in enumerate(edit.get("shorts", [])):
+        yt = short_text(s, job, edit)
+        when = slots[i].strftime("%a %d %b %H:%M") if i < len(slots) else "after the episode is scheduled"
+        done = (job.get("shorts_yt") or {}).get(str(s.get("n")))
+        lines += ["-" * 64, "Short %s.mp4  |  goes live: %s%s" % (s.get("n"), when, ("  |  " + done["url"]) if done else ""),
+                  "TITLE: " + yt["title"], "DESCRIPTION:", yt["description"], ""]
+    lines += ["-" * 64, "Approving the episode approves these Shorts. To change one, write it in CHANGES.txt "
+              "(e.g. \"Short 2: start at ...\")."]
+    with open(os.path.join(folder, "SHORTS.txt"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def process_shorts():
+    for stage in ("review", "approved", "scheduled"):
+        for folder, job in jobs_in(stage):
+            if job.get("stage") == "failed" or job.get("sample"):
+                continue
+            ep = os.path.join(DIRS["work"], job["name"], "edit.json")
+            if not os.path.exists(ep) or not work_edit(job).get("shorts"):
+                continue
+            if not job.get("shorts_rendered") or os.path.getmtime(ep) > job["shorts_rendered"] + 5:
+                if (job.get("shorts_yt") or {}) or job.get("shorts_failed") == os.path.getmtime(ep):
+                    continue  # already on YouTube (never re-render behind its back), or this edit already failed
+                try:
+                    render_shorts(folder, job)
+                    notify("Shorts ready", "%s: %d Shorts in the Shorts folder" % (job["episode"], job.get("shorts_n", 0)))
+                except Exception as e:
+                    log("shorts:", traceback.format_exc())
+                    notify("Shorts failed", "%s: %s" % (job["episode"], str(e)[:120]))
+                    job["shorts_failed"] = os.path.getmtime(ep)
+                    write_json(info(folder, "job.json"), job)
+                continue
+            if stage == "scheduled" and job.get("shorts_ok") and (job.get("youtube") or {}).get("id"):
+                upload_shorts(folder, job)
+
+
+def upload_shorts(folder, job):
+    edit = work_edit(job)
+    done = job.get("shorts_yt") or {}
+    slots = short_slots(job)
+    for i, s in enumerate(edit.get("shorts", [])):
+        key = str(s.get("n", i + 1))
+        f = os.path.join(folder, "Shorts", "Short %s.mp4" % key)
+        if key in done or not os.path.exists(f) or i >= len(slots):
+            continue
+        try:
+            res = pub.youtube_upload(f, short_text(s, job, edit), slots[i].astimezone(timezone.utc),
+                                     category=acfg().get("category_id", "27"))
+        except Exception as e:
+            log("short upload:", traceback.format_exc())
+            if not job.get("shorts_error"):
+                notify("Short upload failed", "%s Short %s: %s" % (job["episode"], key, str(e)[:120]))
+            job["shorts_error"] = str(e)[:300]
+            write_json(info(folder, "job.json"), job)
+            return
+        done[key] = res
+        job.update(shorts_yt=done, shorts_error=None)
+        write_json(info(folder, "job.json"), job)
+        log("uploaded short", job["episode"], key, res)
+        studio_add({"key": "%s/related" % res["id"], "episode": job["episode"], "video_id": res["id"],
+                    "studio_url": "https://studio.youtube.com/video/%s/edit" % res["id"],
+                    "title": s.get("title", ""), "cards": [], "end_screen": None,
+                    "related_video": (job.get("youtube") or {}).get("url"), "waiting_for_next_video": []})
+        notify("Short scheduled", "%s Short %s goes live %s" % (job["episode"], key, slots[i].strftime("%a %d %b %H:%M")))
+    write_shorts_txt(folder, job, edit)
 
 
 def reschedule(folder, job):
@@ -915,7 +1051,7 @@ def tick():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return  # another tick is still working (a render takes a while)
-    for step in (process_approved, process_scheduled, sync_scripts, process_changes, process_inbox, cleanup_posted, check_queue):
+    for step in (process_approved, process_scheduled, process_shorts, sync_scripts, process_changes, process_inbox, cleanup_posted, check_queue):
         try:
             step()
         except Exception:
