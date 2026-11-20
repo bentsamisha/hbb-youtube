@@ -493,7 +493,7 @@ def process_approved():
             shutil.move(folder, os.path.join(DIRS["scheduled"], os.path.basename(folder)))
             notify("Already uploaded", "%s was uploaded before: moved back to 4 Scheduled" % job.get("episode"))
             continue
-        if job.get("stage") == "failed":
+        if job.get("stage") == "failed" or job.get("hold"):
             continue
         if job.get("sample"):
             if not job.get("sample_note"):
@@ -511,6 +511,20 @@ def process_approved():
             shutil.move(folder, os.path.join(DIRS["scheduled"], os.path.basename(folder)))
             notify("Scheduled", "%s: upload it by hand for %s (YOUTUBE.txt)" % (job["episode"], slot.strftime("%a %d %b %H:%M")))
             continue
+        if cfg()["output"].get("final_4k", True) and not job.get("final_4k"):
+            # review rounds are 1080p (fast); the approved version is rendered once in 4K for YouTube
+            try:
+                notify("Rendering 4K", "%s: final 4K render before the upload" % job["episode"])
+                t4 = time.time()
+                out = editor.render(job["name"], final4k=True, log=log)
+                shutil.move(out, main_video(folder))
+                job["final_4k"] = time.time()
+                log("4K render done in %d min" % ((time.time() - t4) / 60))
+            except Exception as e:
+                log("4K render failed, uploading the 1080p version:", e)
+                notify("4K failed", "%s: uploading the 1080p version instead" % job["episode"])
+                job["final_4k"] = "failed"
+            write_json(info(folder, "job.json"), job)
         try:
             post = read_json(info(folder, "post.json"))
             edit = read_json(info(folder, "edit.json"))

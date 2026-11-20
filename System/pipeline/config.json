@@ -94,7 +94,9 @@
   "encoder": "auto",
   "bitrate": "16M",
   "crf": 16,
-  "preset": "medium"
+  "preset": "medium",
+  "final_4k": true,
+  "bitrate_4k": "45M"
  },
  "audio": {
   "lufs": -14,
