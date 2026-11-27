@@ -34,11 +34,15 @@ PUNCH = 1.08          # zoom of every second clip
 PUSH = 0.025          # slow push over a clip
 TITLE_Y = 30          # title card top
 HEAD_GAP = 16         # free space between the title card and his hair
-LOW_GAP = 24          # free space between his chin and the key-line cards
+LOW_GAP = 24          # free space between his chin and the captions
+CAP_MAX = 1470        # lowest caption centre: YouTube's Shorts title, description and buttons cover the area below
+KEYLINE_CARDS = False # cream key-line cards under his chin: off (Mykhailo, 27 Nov 2026: "delete these messages")
 FACE_MODEL = os.path.join(PIPE, "assets", "models", "face_yunet.onnx")  # OpenCV Zoo YuNet (Apache-2.0)
 
 # Layout rule (Mykhailo, 20 Nov 2026): nothing may cover his face. The face is found in every clip, the picture is
 # placed so his hair starts under the title card, and the key-line cards and captions sit below his chin.
+# Captions (27 Nov 2026): one fixed level per Short, as high as the chin allows, never in the bottom strip
+# that YouTube covers. Every range must start at a sentence start and end at a sentence end (check_ranges).
 
 
 def _tok(s):
@@ -224,7 +228,10 @@ def plan_layout(source, clips, fps, cfg, SW, SH, title_h, pop_h=0, log=print):
         zmax = c["level"] * (1 + PUSH)
         low = max(low, head_top + (c["head"]["bottom"] - c["head"]["top"]) * OH * zmax / SH)
     pop_y = int(low + LOW_GAP)
-    cap_y = int(min(pop_y + max(pop_h - 14, 0) + 125, OH - 150))
+    if pop_h:
+        cap_y = int(min(pop_y + max(pop_h - 14, 0) + 125, OH - 150))
+    else:
+        cap_y = int(min(pop_y + 72, CAP_MAX))
     return {"head_top": head_top, "pop_y": pop_y, "cap_y": cap_y}
 
 
@@ -271,6 +278,26 @@ def pop_sprite(txt, accent=()):
             y += x.shape[0] - 6
         _POP[key] = card
     return _POP[key]
+
+
+END = (".", "?", "!")
+
+
+def check_ranges(words, ranges):
+    """Cuts in the middle of a sentence look bad (Mykhailo, 27 Nov 2026). Each range must start where a sentence
+    starts (the word before it ends a sentence) and end on a word that ends one. Returns the problems found."""
+    out = []
+    for a, b in ranges:
+        inside = [w for w in words if w["s"] >= a - 0.05 and w["e"] <= b + 0.05]
+        before = [w for w in words if w["e"] <= a - 0.05]
+        if not inside:
+            out.append("range %.2f-%.2f has no words" % (a, b))
+            continue
+        if before and not before[-1]["w"].rstrip('"\')').endswith(END) and not inside[0]["w"][:1].isupper():
+            out.append("range %.2f-%.2f starts mid-sentence at '%s'" % (a, b, inside[0]["w"]))
+        if not inside[-1]["w"].rstrip('"\')').endswith(END):
+            out.append("range %.2f-%.2f ends mid-sentence at '%s'" % (a, b, inside[-1]["w"]))
+    return out
 
 
 def short_time(ranges, src):
@@ -356,7 +383,10 @@ def render_short(edit, words, cfg, short, out, log=print, stills=None):
     ws = short_words(words, [[c["src_in"], c["src_out"]] for c in clips],
                      cfg.get("fixes", []) + edit.get("fixes", []) + short.get("fixes", []))
     groups = chunks(ws)
-    pops = short_pops(short, apply_all(words, cfg, edit, short), [[c["src_in"], c["src_out"]] for c in clips])
+    pops = short_pops(short, apply_all(words, cfg, edit, short), [[c["src_in"], c["src_out"]] for c in clips]) \
+        if KEYLINE_CARDS else []
+    for warn in check_ranges(words, short["ranges"]):
+        log("  WARNING short %s: %s" % (short.get("n"), warn))
     title, kicker = short.get("title", ""), short.get("kicker", "")
     SW, SH = edit["info"]["width"], edit["info"]["height"]
     pop_h = max([pop_sprite(p["text"], p["accent"]).shape[0] for p in pops] or [0])
