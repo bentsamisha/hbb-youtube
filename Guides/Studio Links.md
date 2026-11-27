@@ -35,3 +35,4 @@ The YouTube API can't add cards or end-screen elements, so this step happens in 
 
 **Shorts**: a to-do with `related_video` is a Short. In Studio open that Short > Details > "Related video" and pick the
 full episode (`related_video` link), save. It makes the "full episode" link show under the Short.
+Studio only lists PUBLIC videos there: while the episode is still scheduled, leave the item as todo for the run after it goes live.
