@@ -11,7 +11,7 @@
 | **Scripts** | `Video_N_Script.md`, exported from the Drive "Audit Videos" folder every hour. |
 | **Strategy** | Master Content System and current state. Read by the editor, never uploaded anywhere, not in git. |
 | **Prompter** | Clean prompter versions of the scripts (Elgato Camera Hub and the browser prompter). |
-| **Guides** | `Setup Steps.md` (one-time), `Autopilot Guide.md` (how it works), `Recording Guide.md` (how to film for it). |
+| **Guides** | `Setup Steps.md` (one-time), `Autopilot Guide.md` (how it works), `Recording Guide.md` (how to film for it), `Stream Deck.md` (the HBB page on the Stream Deck). |
 | **System** | The machinery: pipeline code, work files, logins (`secrets`), logs. No need to open it. |
 
 ## Inside an episode folder
