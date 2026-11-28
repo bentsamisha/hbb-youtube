@@ -1,0 +1,31 @@
+{
+  "Name": "HoneyBadger and Bees",
+  "Version": "1.0.0.0",
+  "Author": "HoneyBadger and Bees",
+  "Description": "Live status of the HoneyBadger and Bees YouTube pipeline and channel, plus recording, prompter and approval keys.",
+  "Icon": "imgs/plugin",
+  "Category": "HoneyBadger and Bees",
+  "CategoryIcon": "imgs/plugin",
+  "UUID": "com.honeybadgerbees.deck",
+  "SDKVersion": 2,
+  "CodePath": "bin/plugin.js",
+  "Nodejs": {"Version": "24", "Debug": "disabled"},
+  "OS": [{"Platform": "mac", "MinimumVersion": "12"}],
+  "Software": {"MinimumVersion": "6.4"},
+  "Actions": [
+    {"UUID": "com.honeybadgerbees.deck.review", "Name": "Review queue", "Tooltip": "Episodes waiting in 2 Review. Press: open the folder", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.pipeline", "Name": "Pipeline now", "Tooltip": "What the autopilot is doing. Press: open the log", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.runway", "Name": "Runway", "Tooltip": "Weeks of episodes already scheduled. Press: open 4 Scheduled", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.nextpost", "Name": "Next episode", "Tooltip": "Next episode going live. Press: open it in YouTube Studio", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.comments", "Name": "New comments", "Tooltip": "New YouTube comments since the last press. Press: open Studio comments (nothing is posted)", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.pulse", "Name": "Channel pulse", "Tooltip": "Subscribers and views of the newest live episode. Press: open analytics", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.rec", "Name": "HBB recording mode", "Tooltip": "Opens Elgato Studio (camera + prompter) and runs a session timer. Press again to stop", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.prompter", "Name": "HBB prompter", "Tooltip": "Opens Elgato Studio on the next HBB script to record (only the script changes)", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.quick", "Name": "Quick review", "Tooltip": "Plays the newest episode in 2 Review in QuickTime", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.linkedin", "Name": "LinkedIn post", "Tooltip": "Next LinkedIn launch post and when it goes. Press: open its LINKEDIN.txt", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.thumbnail", "Name": "Thumbnail", "Tooltip": "Thumbnail of the episode in review. Press: open it (or its prompt if still to make)", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.approve", "Name": "Approve all", "Tooltip": "Press twice: everything ready in 2 Review goes to 3 Approved (video, thumbnail, LinkedIn post, Shorts)", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.studio", "Name": "Studio links", "Tooltip": "Cards and end screens still to add in YouTube Studio. Press: open the next one", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]},
+    {"UUID": "com.honeybadgerbees.deck.auto", "Name": "Friday auto-approve", "Tooltip": "Which episode the Friday 18:00 auto-approve will take. Press: open it", "Icon": "imgs/action", "States": [{"Image": "imgs/key"}], "Controllers": ["Keypad"]}
+  ]
+}

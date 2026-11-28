@@ -13,6 +13,8 @@ Trust No Pack pipeline (`~/TNP/System/pipeline`), rebuilt for long landscape tal
   and the end card, composited frame by frame and piped to ffmpeg. Graphics are listed in edit.json `graphics`.
 - `scripts.py`: parses the Video_N_Script docs (prompter text + production table cues) and exports them from Drive.
 - `publish.py`: YouTube Data API upload (schedule, thumbnail, captions, playlist) and Drive read access.
+- `deck.py` + `streamdeck/com.honeybadgerbees.deck.sdPlugin`: the HoneyBadger and Bees Stream Deck page (live status keys,
+  REC timer, prompter, approve). See `Guides/Stream Deck.md`.
 - `EDITOR.md`: what the headless Claude editor does. `EDITOR_NOTES.md`: lasting feedback.
 - `config.json`: look, cut, audio, brand, schedule. `assets/`: logos and fonts (Fraunces and Outfit for the video, DM Serif Display and Inter kept for reference; SIL OFL).
 
